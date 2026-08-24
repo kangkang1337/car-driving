@@ -1,0 +1,14 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define max 1005
+
+int main()
+{
+	
+	return 0;
+}
