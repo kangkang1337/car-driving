@@ -227,4 +227,127 @@ Run_Motor_For(SWING_SLOW_PWM, SWING_FAST_PWM, 450);
 提高 SWING_SLOW_PWM，或缩短摆头时间。
 ```
 
+# hi3861部分
+
+## 串口双线程输出
+
+在 `1.0Hello_world` 中写了 `hello_world.c`，使用 CMSIS-RTOS2 创建两个线程：
+
+- `thread1`：每 1 秒输出一次 `Hello World!`
+- `thread2`：先延时 1 秒，再每 3 秒输出一次 `Hello QST!`
+
+一开始串口助手里中文显示成乱码，例如 `任务1正在运行!` 显示成其他字符。原因是编码不一致：程序输出 UTF-8，串口助手按 GBK/ANSI 解码。解决办法是串口助手切换到 UTF-8，或者程序里只输出英文/ASCII。
+
+## 串口动画实验
+
+在同一目录下新增了几个独立 C 文件：
+
+- `square_loader.c`：每 100 ms 输出一次方形加载动画。
+- `progress_bar.c`：每 100 ms 输出进度条和旋转符号。
+- `beijing_clock.c`：每秒输出一次东八区软件时钟。
+
+注意：这些文件都带有 `APP_FEATURE_INIT(...)`，通常一次只编译其中一个。需要在当前目录的 `BUILD.gn` 里切换 `sources`。
+
+进度条实验曾经出现链接错误：
+
+```text
+undefined reference to `fflush`
+```
+
+原因是 Hi3861 LiteOS 当前链接库没有提供 `fflush`。解决办法是删除：
+
+```c
+fflush(stdout);
+```
+
+## BUILD.gn 常见问题
+
+今天多次遇到 GN 路径和 target 不一致的问题。
+
+如果上级 `applications/sample/wifi-iot/app/BUILD.gn` 写：
+
+```gn
+"2.0_SG90:sg90",
+```
+
+则必须同时满足：
+
+```text
+目录名: applications/sample/wifi-iot/app/2.0_SG90
+子目录 BUILD.gn target: static_library("sg90")
+源码文件名: 与 sources 中完全一致
+```
+
+Linux 区分大小写，所以 `SG90.c` 和 `sg90.c` 不是同一个文件。
+
+如果出现：
+
+```text
+Unable to load ".../BUILD.gn"
+```
+
+说明 GN 连子目录的 `BUILD.gn` 都没有找到，优先检查目录名是否写错、是否有多余字符、是否实际存在。
+
+如果出现：
+
+```text
+Unresolved dependencies
+```
+
+说明目录可能存在，但 target 名和上级引用不一致。
+
+## SG90 舵机控制
+
+在 `3.0SG90` 中创建了舵机控制程序。SG90 信号线接 GPIO2，控制原理是输出周期约 20 ms 的脉冲：
+
+```text
+0.5 ms  -> 约 0 度/最左侧
+1.5 ms  -> 约 90 度/中间
+2.5 ms  -> 约 180 度/最右侧
+```
+
+当前版本已经改成连续扫动：
+
+- 从最左侧匀速转到最右侧
+- 再从最右侧匀速转回最左侧
+- 无限循环
+
+核心参数：
+
+```c
+#define SG90_LEFT_DUTY_US 500
+#define SG90_RIGHT_DUTY_US 2500
+#define SG90_DUTY_STEP_US 20
+#define SG90_PULSE_REPEAT 2
+```
+
+想让舵机转得更快，可以增大 `SG90_DUTY_STEP_US`。想让它转得更慢，可以增大 `SG90_PULSE_REPEAT`。
+
+## 烧录和运行
+
+使用 HiBurn 烧录时，如果出现：
+
+```text
+Wait connect success flag (hisilicon) overtime.
+```
+
+常见原因是芯片没有进入烧录模式、串口被占用、COM 口选错、USB 线不支持数据传输，或者板子上的开关没有拨回 Hi3861。
+
+烧录常用流程：
+
+```text
+关闭串口助手
+HiBurn 选择正确 COM 口
+加载 Hi3861_wifiiot_app_allinone.bin
+按住 BOOT
+点击 Burn/Connect
+按一下 RESET
+开始下载后松开 BOOT
+```
+
+烧录完成后，关闭或断开 HiBurn 的串口连接，打开串口助手，然后按一下 `RESET`，程序会重新启动并自动运行。
+
+停止程序的最简单办法是断电、拔 USB，或者按住 `RESET`。如果舵机仍在抖动，也要断开舵机的 5V 电源。
+
+
 今天整体结论：这辆小车用开环 PWM 可以完成基础运动，但左右电机差异和启动摩擦比较明显。后续如果要走得更准，需要加入编码器闭环控制。
