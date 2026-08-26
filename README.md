@@ -1,6 +1,7 @@
 # car-driving
 summer school from 8.24 to 9.6
 
+# 8.26
 # Hi3861 OpenHarmony Practice Notes
 
 This folder contains several small OpenHarmony examples for the Hi3861 board.
