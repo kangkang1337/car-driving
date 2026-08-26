@@ -29,5 +29,7 @@ Hello QST!
 ```
 
 beijing_clock is just a timer to record how long it had passed since the beginning.
+
 progress_bar is a interesting processer for every 100ms, like [##          ] 20% with a arrow behind it.
+
 square_loader is a normal pic generator to make the "*" to go around the square.
