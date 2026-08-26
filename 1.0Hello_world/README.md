@@ -15,7 +15,7 @@ Then add the module to the parent `BUILD.gn`:
 
 ```gn
 features = [
-  "1.0Hello_world:hello_world",
+  "1.0_Hello_world:hello_world",
 ]
 ```
 
