@@ -88,3 +88,233 @@ If the build succeeds, flash the generated Hi3861 firmware with HiBurn. After fl
 - `undefined reference to fflush`: do not use `fflush(stdout)` on this Hi3861 LiteOS build.
 - Chinese text appears as garbled characters in the serial assistant: switch the serial assistant to UTF-8, or print ASCII text only.
 - HiBurn shows `Wait connect success flag (hisilicon) overtime`: close other serial tools, select the correct COM port, hold `BOOT`, click burn/connect, press `RESET`, then release `BOOT` after downloading starts. Also check that the board switch is set back to Hi3861.
+
+
+# 8.27
+
+## Overview
+
+This Hi3861 workspace contains several OpenHarmony LiteOS sample projects for the QST smart car platform.
+
+Today’s main work focused on the `4.0Hcsr` project, which uses the HC-SR04 ultrasonic sensor and system tick APIs.
+
+## Project Path
+
+```text
+C:\Users\18500\Desktop\summer\SSH-192.168.13.128
+```
+
+Main sample folders:
+
+```text
+1.0Hello_world
+3.0SG90
+4.0Hcsr
+```
+
+## 4.0Hcsr Project
+
+The `4.0Hcsr` project implements:
+
+- HC-SR04 ultrasonic distance measurement
+- CMSIS-RTOS2 software timers
+- periodic system tick printing
+
+Main files:
+
+```text
+4.0Hcsr/tick.c
+4.0Hcsr/BUILD.gn
+```
+
+## Hardware Connection
+
+According to the QST car schematic:
+
+```text
+TRIG -> GPIO7 / IO7
+ECHO -> GPIO8 / IO8
+VCC  -> 5V
+GND  -> GND
+```
+
+The Hi3861 module uses 3.3V IO. Since many HC-SR04 modules output 5V on `ECHO`, a voltage divider or level shifter is recommended.
+
+## Software Timers
+
+Two CMSIS software timers are created in `tick.c`.
+
+### Distance Measurement Timer
+
+```c
+#define HCSR04_MEASURE_PERIOD_TICKS 300
+```
+
+This timer triggers ultrasonic distance measurement about every 3 seconds.
+
+### Tick Print Timer
+
+```c
+#define TICK_PRINT_PERIOD_TICKS 100
+```
+
+This timer prints the current system tick about every 1 second.
+
+Example output:
+
+```text
+current tick: 143
+current tick: 243
+distance timeout: echo never high.
+current tick: 346
+```
+
+## Distance Measurement Logic
+
+The program sends a short trigger pulse through GPIO7:
+
+```c
+GpioSetOutputVal(HCSR04_TRIG_GPIO, WIFI_IOT_GPIO_VALUE1);
+hi_udelay(20);
+GpioSetOutputVal(HCSR04_TRIG_GPIO, WIFI_IOT_GPIO_VALUE0);
+```
+
+Then it waits for GPIO8 to receive the ECHO pulse.
+
+Distance is calculated from the ECHO high-level duration:
+
+```c
+distance = echo_time_us * 0.034 / 2;
+```
+
+The result is in centimeters.
+
+## Timeout Messages
+
+The program distinguishes two timeout cases.
+
+```text
+distance timeout: echo never high.
+```
+
+This means the ECHO pin never became high.
+
+Possible causes:
+
+- HC-SR04 has no power
+- TRIG and ECHO are reversed
+- ECHO is not connected to GPIO8
+- GND is not shared
+- sensor module is faulty
+- ECHO voltage level is not compatible
+
+```text
+distance timeout: echo never low.
+```
+
+This means ECHO became high but never returned low.
+
+Possible causes:
+
+- ECHO pin is floating
+- ECHO is stuck high
+- wiring error
+- sensor module abnormal behavior
+
+## BUILD.gn
+
+The `4.0Hcsr/BUILD.gn` file builds the project as a static library:
+
+```gn
+static_library("Hcsr04") {
+  sources = [
+    "tick.c",
+  ]
+
+  include_dirs = [
+    "//utils/native/lite/include",
+    "//kernel/liteos_m/components/cmsis/2.0",
+    "//base/iot_hardware/interfaces/kits/wifiiot_lite",
+  ]
+}
+```
+
+To enable this sample in the OpenHarmony app build, the parent `BUILD.gn` should include:
+
+```gn
+"4.0Hcsr:Hcsr04",
+```
+
+## SG90 Servo Project
+
+The `3.0SG90` project controls an SG90 servo.
+
+Main file:
+
+```text
+3.0SG90/SG90.c
+```
+
+Servo signal pin:
+
+```c
+#define SG90_GPIO 2
+```
+
+Expected startup serial output:
+
+```text
+SG90 sweep start.
+SG90 left to right.
+SG90 right to left.
+```
+
+If the serial output appears but the servo does not move, check servo power and wiring. The servo should normally use an external 5V supply with common GND.
+
+## Serial and Burning Notes
+
+The QST car uses a CH340 USB-to-serial chip.
+
+Important points:
+
+- `COM3` appearing in Windows only proves that CH340 is detected.
+- It does not always prove that the Hi3861 chip is running correctly.
+- The USB serial switch must be set to the Hi3861 side.
+- The board has a reset key, but no separate BOOT key.
+- When using HiBurn, start burning first, then press the physical reset key when the tool waits for connection.
+
+Common HiBurn error:
+
+```text
+Wait connect success flag (hisilicon) overtime.
+```
+
+This usually means HiBurn opened the COM port, but the Hi3861 did not enter the expected download handshake state.
+
+Possible causes:
+
+- wrong serial switch position
+- unstable power
+- reset timing issue
+- Hi3861 not powered correctly
+- wrong target firmware
+- damaged or unstable board hardware
+
+## Debug Summary
+
+From today’s serial output:
+
+```text
+current tick: 143
+current tick: 243
+distance timeout: echo never high.
+current tick: 346
+```
+
+The increasing tick value proves that:
+
+- Hi3861 is running
+- the task was created successfully
+- both software timer logic and serial output are active
+
+The repeated distance timeout indicates that the ultrasonic ECHO signal is not being detected. This points more toward sensor wiring, power, module condition, or voltage-level compatibility than toward the software timer logic.
