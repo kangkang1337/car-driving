@@ -353,3 +353,418 @@ HiBurn 选择正确 COM 口
 
 
 今天整体结论：这辆小车用开环 PWM 可以完成基础运动，但左右电机差异和启动摩擦比较明显。后续如果要走得更准，需要加入编码器闭环控制。
+
+# 今日笔记：Hi3861 与 STM32 小车调试
+
+## 一、Hi3861 部分
+
+### 1. 工程路径
+
+```text
+C:\Users\18500\Desktop\summer\SSH-192.168.13.128
+```
+
+今天主要处理：
+
+```text
+4.0Hcsr
+```
+
+新增/修改文件：
+
+```text
+4.0Hcsr\tick.c
+4.0Hcsr\BUILD.gn
+```
+
+### 2. tick.c 实现内容
+
+创建了两个软件定时器：
+
+```text
+定时器1：每 3 秒测一次超声波距离
+定时器2：每 1 秒打印一次当前 tick 值
+```
+
+核心功能：
+
+```c
+hi_get_tick();   // 获取当前系统 tick
+hi_get_us();     // 获取微秒级时间
+osTimerNew();    // 创建软件定时器
+osTimerStart();  // 启动软件定时器
+```
+
+### 3. 超声波接线
+
+按照 QST 鸿蒙小车原理图：
+
+```text
+TRIG -> GPIO7 / IO7
+ECHO -> GPIO8 / IO8
+VCC  -> 5V
+GND  -> GND
+```
+
+代码中对应：
+
+```c
+#define HCSR04_TRIG_GPIO 7
+#define HCSR04_ECHO_GPIO 8
+```
+
+### 4. 串口输出含义
+
+示例输出：
+
+```text
+current tick: 143
+current tick: 243
+distance timeout: echo never high.
+current tick: 346
+```
+
+含义：
+
+```text
+current tick
+表示系统当前 tick 值，会一直增加，说明程序正在运行。
+
+distance timeout: echo never high
+表示程序已经发出 TRIG 触发信号，但 ECHO 引脚一直没有检测到高电平。
+```
+
+### 5. 当前判断
+
+从串口输出看：
+
+```text
+current tick 持续增加
+```
+
+说明：
+
+```text
+Hi3861 已经在运行
+线程创建成功
+软件定时器运行正常
+串口输出正常
+```
+
+但一直出现：
+
+```text
+distance timeout: echo never high.
+```
+
+说明问题更可能在：
+
+```text
+超声波模块供电
+TRIG/ECHO 接线
+GND 是否共地
+ECHO 是否接到 GPIO8
+模块本身是否损坏
+ECHO 5V 电平与 Hi3861 3.3V IO 是否兼容
+```
+
+### 6. HiBurn 烧录问题
+
+曾出现错误：
+
+```text
+Wait connect success flag (hisilicon) overtime.
+```
+
+含义：
+
+```text
+HiBurn 能打开 COM 口，但没有等到 Hi3861 的下载握手回应。
+```
+
+注意：
+
+```text
+COM3 正常出现，只说明 CH340 USB 转串口芯片正常。
+不一定说明 Hi3861 主控正常运行。
+```
+
+QST 鸿蒙小车没有 BOOT 键，只有复位键。烧录时应：
+
+```text
+HiBurn 选择 COM3
+点击烧录
+出现 Connecting...
+按实体 RESET 键
+```
+
+还要确认 USB 串口切换开关拨到 Hi3861 一侧。
+
+---
+
+## 二、Hi3861 硬件排查结论
+
+### 1. 供电问题
+
+排查中发现：
+
+```text
+校准后能短暂运行
+过几秒后又不行
+3861 芯片不上电
+```
+
+这说明问题更偏向供电链路。
+
+原理图中 Hi3861 供电路径：
+
+```text
+5.0VD -> AMS1117-3.3 -> 3.3VD -> Hi3861 VCC
+```
+
+建议排查：
+
+```text
+只插 USB，不接外设
+测 3.3VD 是否稳定
+观察 AMS1117 是否发烫
+检查 Type-C 接口、电源开关、拨码开关是否接触不良
+```
+
+### 2. ST-Link 与 USB
+
+注意：
+
+```text
+ST-Link 不参与 Hi3861 烧录。
+```
+
+调试 Hi3861 时建议：
+
+```text
+先只接 USB
+拔掉 ST-Link
+拔掉舵机、超声波、电机等外设
+```
+
+避免外设或其它供电路径干扰。
+
+---
+
+## 三、STM32 部分
+
+### 1. 工程路径
+
+```text
+C:\Users\18500\Desktop\summer\stm32
+```
+
+主要处理过：
+
+```text
+PID
+TIMER
+NFC
+```
+
+### 2. PID 工程
+
+PID 工程路径：
+
+```text
+C:\Users\18500\Desktop\summer\stm32\PID
+```
+
+核心文件：
+
+```text
+USER\main.c
+USER\stm32f10x_it.c
+QST_HARDWARE\SYSTEM_CONTROL\control_system.c
+QST_HARDWARE\SYSTEM_CONTROL\control_system.h
+QST_HARDWARE\motor\motor.c
+QST_HARDWARE\encoder\encoder.c
+```
+
+### 3. PID 速度闭环
+
+控制流程：
+
+```text
+main.c 初始化编码器、PWM、串口、SysTick
+SysTick 每 1ms 中断一次
+每 100ms 调用一次 System_Control()
+System_Control() 读取编码器速度
+PID 计算左右轮 PWM
+Set_Pwm() 输出到电机
+```
+
+### 4. 串口输出含义
+
+```text
+left coder
+左轮 100ms 内实际编码器计数
+
+right coder
+右轮 100ms 内实际编码器计数
+
+TageA coder
+左轮目标编码器计数
+
+TageB coder
+右轮目标编码器计数
+
+Motor_A pwm
+左轮 PID 输出 PWM
+
+Motor_B pwm
+右轮 PID 输出 PWM
+
+State
+当前运动状态
+
+Distance
+当前阶段累计编码器计数
+```
+
+### 5. 运动逻辑
+
+当前实现：
+
+```text
+前进约 1m
+停车约 0.5s
+倒退约 1m
+最终停止
+```
+
+状态含义：
+
+```text
+State = 0  前进
+State = 1  暂停 0.5s
+State = 2  倒退
+State = 3  停止
+```
+
+距离控制：
+
+```c
+#define DRIVE_DISTANCE_COUNTS 14000
+```
+
+暂停时间：
+
+```c
+#define DRIVE_PAUSE_TICKS 5
+```
+
+因为控制周期是 100ms：
+
+```text
+5 * 100ms = 0.5s
+```
+
+### 6. 速度参数
+
+前进速度：
+
+```c
+#define TARGET_LEFT_RPS       2.2f
+#define TARGET_RIGHT_RPS      2.3f
+```
+
+倒退速度：
+
+```c
+#define BACKWARD_LEFT_RPS     2.7f
+#define BACKWARD_RIGHT_RPS    2.8f
+```
+
+倒退最小 PWM 补偿：
+
+```c
+#define BACKWARD_MIN_PWM      1600
+```
+
+作用：
+
+```text
+减少倒退时速度过低和抖动问题。
+```
+
+### 7. PID 参数
+
+左右轮 PID 参数位于：
+
+```text
+control_system.c
+```
+
+默认参数：
+
+```c
+const float kp = 7.0f;
+const float ki = 0.016f;
+const float kd = 0.003f;
+```
+
+调参原则：
+
+```text
+kp 增大：响应更快，但可能抖动
+kp 减小：更稳，但响应慢
+
+ki 增大：更容易消除稳态误差
+ki 减小：减少积分导致的波动
+
+kd 增大：抑制突变和超调
+kd 过大：可能放大编码器噪声
+```
+
+---
+
+## 四、彩灯部分
+
+### 1. 文件位置
+
+```text
+C:\Users\18500\Desktop\summer\stm32\PID\QST_HARDWARE\colorful_led\colorful_led.c
+```
+
+### 2. 修改内容
+
+修改了：
+
+```c
+LR_rainbow()
+```
+
+实现彩虹跑马灯效果。
+
+效果：
+
+```text
+红、黄、绿、青、蓝、紫六色循环移动
+左右两边灯同步刷新
+```
+
+速度调整：
+
+```c
+delay_ms(100);
+```
+
+数值越小，跑马灯越快。
+
+---
+
+## 五、今日关键结论
+
+1. `current tick` 持续增加，说明 Hi3861 程序确实在运行。
+2. `distance timeout: echo never high` 表示超声波 ECHO 没有被检测到高电平。
+3. COM3 正常只说明 CH340 正常，不等于 Hi3861 一定正常。
+4. HiBurn 超时通常是下载握手失败，不一定是代码问题。
+5. QST 鸿蒙小车没有 BOOT 键，烧录依赖串口切换和 RESET。
+6. Hi3861 供电问题很可能存在，重点检查 3.3VD、AMS1117、外设负载和接触问题。
+7. STM32 PID 已实现前进、暂停、倒退、停止的闭环运动流程。
