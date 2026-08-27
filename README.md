@@ -101,3 +101,225 @@ When `HELLO` is received, the car stops for 10 seconds and then continues the pr
 - If the motor noise is high, keep PWM near or above 20 kHz.
 - Avoid switching between forward and reverse too quickly; short intervals such as 100 ms can make the car jerk instead of moving smoothly.
 
+# 8.27
+
+## Overview
+
+This STM32 workspace contains several small embedded projects for the QST smart car platform. The projects are based on STM32F10x standard peripheral libraries and are intended for Keil uVision development.
+
+The main STM32 projects include:
+
+- `PWM`: basic PWM motor output
+- `TIMER`: encoder and timer-based motor speed output
+- `PID`: motor speed closed-loop PID control
+- `NFC`: NFC-related project structure
+- `2_串口收发打印`: UART print and receive test project
+
+## Hardware Platform
+
+Target platform:
+
+- MCU: STM32F103 series
+- Motor driver: L9110S
+- Left motor PWM: `TIM4_CH2 / PB7`
+- Left motor direction: `PB14`
+- Right motor PWM: `TIM4_CH1 / PB6`
+- Right motor direction: `PB13`
+- Left encoder: `TIM2`
+- Right encoder: `TIM3`
+- RGB LEDs: WS2812 colorful LED module
+- UART: used for debug output
+
+## Project Structure
+
+Typical project layout:
+
+```text
+PROJECT_NAME/
+├── CORE/
+├── OBJ/
+├── QST_HARDWARE/
+│   ├── colorful_led/
+│   ├── encoder/
+│   ├── motor/
+│   └── SYSTEM_CONTROL/
+├── STM32F10x_FWLib/
+├── SYSTEM/
+│   ├── delay/
+│   ├── sys/
+│   └── usart/
+└── USER/
+    ├── main.c
+    ├── stm32f10x_it.c
+    └── *.uvprojx
+```
+
+## PID Project
+
+The `PID` project implements motor speed closed-loop control.
+
+Main files:
+
+```text
+PID/USER/main.c
+PID/USER/stm32f10x_it.c
+PID/QST_HARDWARE/SYSTEM_CONTROL/control_system.c
+PID/QST_HARDWARE/SYSTEM_CONTROL/control_system.h
+PID/QST_HARDWARE/motor/motor.c
+PID/QST_HARDWARE/encoder/encoder.c
+```
+
+### Control Flow
+
+1. `main.c` initializes the system clock, UART, delay, encoders, PWM, LEDs, and SysTick.
+2. SysTick runs every 1 ms.
+3. `stm32f10x_it.c` calls `System_Control()` every 100 ms.
+4. `System_Control()` reads encoder values, calculates PID output, and updates motor PWM.
+
+### Serial Output
+
+The PID project prints debug information through UART:
+
+```text
+left  coder
+right coder
+TageA coder
+TageB coder
+Motor_A pwm
+Motor_B pwm
+State
+Distance
+```
+
+Meaning:
+
+- `left coder`: measured left encoder count during one control period
+- `right coder`: measured right encoder count during one control period
+- `TageA coder`: target encoder count for the left motor
+- `TageB coder`: target encoder count for the right motor
+- `Motor_A pwm`: PID PWM output for the left motor
+- `Motor_B pwm`: PID PWM output for the right motor
+- `State`: current motion state
+- `Distance`: accumulated encoder count for the current motion stage
+
+## Motion Logic
+
+The current PID project supports a simple movement sequence:
+
+```text
+1. Move forward about 1 meter
+2. Stop for about 0.5 seconds
+3. Move backward about 1 meter
+4. Stop
+```
+
+The distance is estimated from encoder counts:
+
+```c
+#define DRIVE_DISTANCE_COUNTS 14000
+```
+
+If the actual distance is too short, increase this value.  
+If the actual distance is too long, decrease this value.
+
+The pause time is controlled by:
+
+```c
+#define DRIVE_PAUSE_TICKS 5
+```
+
+The control period is 100 ms, so `5` ticks is about 0.5 seconds.
+
+## Speed Settings
+
+Forward speed:
+
+```c
+#define TARGET_LEFT_RPS       2.2f
+#define TARGET_RIGHT_RPS      2.3f
+```
+
+Backward speed:
+
+```c
+#define BACKWARD_LEFT_RPS     2.7f
+#define BACKWARD_RIGHT_RPS    2.8f
+```
+
+Backward startup compensation:
+
+```c
+#define BACKWARD_MIN_PWM      1600
+```
+
+Increase `BACKWARD_MIN_PWM` if the car shakes or cannot start backward.  
+Decrease it if the backward motion starts too aggressively.
+
+## PID Parameters
+
+PID parameters are located in `control_system.c`.
+
+Each motor has its own incremental PID function:
+
+```c
+int Incremental_PID_A(int encoder, int target)
+int Incremental_PID_B(int encoder, int target)
+```
+
+Default parameters:
+
+```c
+const float kp = 7.0f;
+const float ki = 0.016f;
+const float kd = 0.003f;
+```
+
+Tuning suggestions:
+
+- Increase `kp` if the response is too slow.
+- Decrease `kp` if the motor oscillates.
+- Increase `ki` if the motor cannot reach the target speed.
+- Decrease `ki` if the speed drifts or overshoots.
+- Increase `kd` slightly if the response is too aggressive.
+- Set `kd` closer to zero if encoder noise causes jitter.
+
+## RGB LED Effects
+
+The colorful LED module uses WS2812 LEDs.
+
+Main file:
+
+```text
+QST_HARDWARE/colorful_led/colorful_led.c
+```
+
+The `LR_rainbow()` function implements a rainbow running-light effect. The LEDs display a six-color rainbow sequence and rotate continuously.
+
+Speed can be adjusted by changing:
+
+```c
+delay_ms(100);
+```
+
+Smaller delay means faster animation.
+
+## Build and Flash
+
+Open the corresponding `.uvprojx` file in Keil uVision.
+
+For the PID project:
+
+```text
+PID/USER/PID.uvprojx
+```
+
+Build the project, then download it to the STM32 board using the configured debugger.
+
+## Notes
+
+- Do not change unrelated project files unless necessary.
+- Keep motor direction signs consistent with the actual wiring.
+- If the car moves in the wrong direction, reverse the target speed sign or adjust motor wiring.
+- If PWM output reaches `PWM_MAX` but speed is still too low, the motor may be underpowered or overloaded.
+- Encoder direction may differ between left and right wheels depending on wiring.
+- For stable motor testing, ensure the battery voltage and motor driver power are sufficient.
