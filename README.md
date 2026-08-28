@@ -318,3 +318,53 @@ The increasing tick value proves that:
 - both software timer logic and serial output are active
 
 The repeated distance timeout indicates that the ultrasonic ECHO signal is not being detected. This points more toward sensor wiring, power, module condition, or voltage-level compatibility than toward the software timer logic.
+
+
+# 8.28
+
+Today I completed the UART, BLE, OLED, and SHT20 temperature-humidity sensor experiments on the Hi3861 development board.
+
+## UART and BLE Communication
+
+I implemented the UART communication project under `5.0Uart`. The program uses UART1 with GPIO0 as TXD and GPIO1 as RXD. It initializes the UART interface, receives data from the BLE module, and sends the received message back through UART.
+
+The UART target name was changed to `UartDemo` to avoid a conflict with the system UART driver library. The parent `BUILD.gn` should use:
+
+```gn
+"5.0Uart:UartDemo",
+```
+
+During testing, I confirmed that the JDY-16 BLE module could connect successfully. The serial log showed:
+
+```text
+UART recv: +CONNECTED
+```
+
+After enabling `Subscribe` under `Notified Values` in the BLE debugging app, the phone was able to receive the echoed `HELLO` message. This confirmed that the BLE-to-UART communication path worked correctly.
+
+## OLED Display
+
+I completed the OLED SSD1306 project and added the required driver files from the support package. The project initializes the OLED through I2C and displays text and time information on the screen.
+
+The OLED project includes the SSD1306 driver source and header files, and the `BUILD.gn` file was updated to include the correct source files and include paths.
+
+## SHT20 Temperature and Humidity Project
+
+I implemented the SHT20 project under `8.0SHT`. The project reads temperature and humidity data from the SHT20 sensor through I2C, then outputs the data in two ways:
+
+- Displays temperature and humidity on the OLED screen
+- Prints temperature and humidity values to UartAssist through `printf`
+
+The project also uses a semaphore to control periodic sensor reading. The sensor data is refreshed every few seconds.
+
+The parent `BUILD.gn` should include:
+
+```gn
+"8.0SHT:Sht20",
+```
+
+Since the SHT20 project already includes the OLED driver, the standalone OLED experiment should be disabled when compiling this project to avoid duplicate symbol errors.
+
+## Result
+
+By the end of the day, UART communication, BLE message receiving and echoing, OLED display, and SHT20 temperature-humidity output were all implemented and tested.
