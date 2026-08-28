@@ -323,3 +323,53 @@ Build the project, then download it to the STM32 board using the configured debu
 - If PWM output reaches `PWM_MAX` but speed is still too low, the motor may be underpowered or overloaded.
 - Encoder direction may differ between left and right wheels depending on wiring.
 - For stable motor testing, ensure the battery voltage and motor driver power are sufficient.
+
+
+# 8.28
+
+Today I implemented and tested the NFC card control logic for the STM32 car project.
+
+The NFC module can now read different card IDs correctly through the PN532 UART interface. The received card ID bytes are checked from `buf[19]` to `buf[22]`.
+
+Current card behavior:
+
+- `CB:98:A6:05`: moves the car forward
+- `63:31:47:06`: stops the car and toggles the LED state
+- `50:84:FC:23`: LED control card
+- `40:74:80:23`: LED control card
+
+The motor driver from the PWM project was added into the NFC project. The NFC project now initializes PWM before starting the NFC scan loop.
+
+Main motor-related changes:
+
+```c
+PWM_Init(PWM_MAX, 9);
+```
+
+When the forward card is detected, the car first uses full PWM for a short startup boost, then keeps moving forward with a stable PWM value:
+
+```c
+Set_Pwm(FORWARD_START_PWM, FORWARD_START_PWM);
+delay_ms(300);
+Set_Pwm(FORWARD_PWM, FORWARD_PWM);
+```
+
+When the stop card is detected, the motor stops immediately:
+
+```c
+Motor_Stop();
+```
+
+The stop card also keeps the previous LED toggle behavior, so scanning it will stop the car and switch the LED state.
+
+Debug messages were added to help verify the program flow through the serial monitor:
+
+```text
+PWM init ok
+NFC wake up ok
+NFC forward card
+NFC stop card
+NFC led card
+```
+
+After testing, the NFC card recognition worked correctly. The motor did not move at first because the car power switch was not turned on. After enabling the power, the NFC forward logic was confirmed to work.
