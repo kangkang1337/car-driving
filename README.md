@@ -354,7 +354,7 @@ HiBurn 选择正确 COM 口
 
 今天整体结论：这辆小车用开环 PWM 可以完成基础运动，但左右电机差异和启动摩擦比较明显。后续如果要走得更准，需要加入编码器闭环控制。
 
-# 今日笔记：Hi3861 与 STM32 小车调试
+# 2026-8-27
 
 ## 一、Hi3861 部分
 
@@ -768,3 +768,379 @@ delay_ms(100);
 5. QST 鸿蒙小车没有 BOOT 键，烧录依赖串口切换和 RESET。
 6. Hi3861 供电问题很可能存在，重点检查 3.3VD、AMS1117、外设负载和接触问题。
 7. STM32 PID 已实现前进、暂停、倒退、停止的闭环运动流程。
+
+
+# 2026-8-28
+
+# Hi3861部分
+
+今天主要完成了 Hi3861 开发板上的 UART 蓝牙通信、OLED 显示以及 SHT20 温湿度采集实验。
+
+## 1. UART 蓝牙通信实验
+
+工程目录：
+
+```text
+applications/sample/wifi-iot/app/5.0Uart
+```
+
+本实验使用 UART1 实现串口收发：
+
+```text
+GPIO0 -> UART1_TXD
+GPIO1 -> UART1_RXD
+```
+
+程序中完成了 UART1 初始化、串口接收、消息队列传递以及串口回显功能。手机通过 JDY-16 蓝牙模块发送数据，Hi3861 接收后再通过 UART 回发。
+
+`BUILD.gn` 中的目标名不能写成 `Uart`，否则会和系统自带的 UART 驱动库 `libuart.a` 冲突，导致链接时报 multiple definition 错误。因此工程目标名改为：
+
+```gn
+static_library("UartDemo")
+```
+
+父级 `app/BUILD.gn` 中应添加：
+
+```gn
+"5.0Uart:UartDemo",
+```
+
+测试时，串口日志中出现：
+
+```text
+UART recv: +CONNECTED
+```
+
+说明手机已经连接到 JDY-16 蓝牙模块，并且蓝牙模块能通过 UART 把连接状态发送给 Hi3861。
+
+之后在 BLE 调试 App 中打开 `Notified Values` 下的 `Subscribe`，手机端就能收到 Hi3861 回发的数据。发送 `HELLO` 后，UartAssist 中能看到：
+
+```text
+UART recv: HELLO
+```
+
+手机端也能收到回显的 `HELLO`，说明蓝牙 UART 收发通信成功。
+
+## 2. OLED 显示实验
+
+工程目录：
+
+```text
+applications/sample/wifi-iot/app/7.0OLED
+```
+
+OLED 使用 SSD1306 驱动，通过 I2C 总线通信。工程中需要从支持包复制 OLED 驱动文件：
+
+```text
+include/hal_bsp_ssd1306.h
+include/hal_bsp_ssd1306_fonts.h
+include/hal_bsp_ssd1306_bmps.h
+src/hal_bsp_ssd1306.c
+```
+
+`BUILD.gn` 中需要同时编译主程序和 OLED 驱动：
+
+```gn
+sources = [
+  "I2c_Ssd1306.c",
+  "src/hal_bsp_ssd1306.c",
+]
+```
+
+并添加头文件路径：
+
+```gn
+include_dirs = [
+  "//utils/native/lite/include",
+  "//kernel/liteos_m/components/cmsis/2.0",
+  "//base/iot_hardware/interfaces/kits/wifiiot_lite",
+  "include",
+]
+```
+
+OLED 初始化成功后，串口会输出：
+
+```text
+I2C SSD1306 Init is succeeded!!!
+```
+
+实验中 OLED 可以显示固定文字和时间信息。
+
+## 3. SHT20 温湿度实验
+
+工程目录：
+
+```text
+applications/sample/wifi-iot/app/8.0SHT
+```
+
+SHT20 是温湿度传感器，使用 I2C 通信。由于本实验要求同时在 OLED 和 UartAssist 中输出温湿度，因此工程中同时加入了 SHT20 驱动和 SSD1306 OLED 驱动。
+
+需要的文件结构：
+
+```text
+8.0SHT
+├── BUILD.gn
+├── sht.c
+├── include
+│   ├── hal_bsp_sht20.h
+│   ├── hal_bsp_ssd1306.h
+│   ├── hal_bsp_ssd1306_fonts.h
+│   └── hal_bsp_ssd1306_bmps.h
+└── src
+    ├── hal_bsp_sht20.c
+    └── hal_bsp_ssd1306.c
+```
+
+`BUILD.gn` 内容：
+
+```gn
+static_library("Sht20") {
+  sources = [
+    "sht.c",
+    "src/hal_bsp_sht20.c",
+    "src/hal_bsp_ssd1306.c",
+  ]
+
+  include_dirs = [
+    "//utils/native/lite/include",
+    "//kernel/liteos_m/components/cmsis/2.0",
+    "//base/iot_hardware/interfaces/kits/wifiiot_lite",
+    "include",
+  ]
+}
+```
+
+父级 `app/BUILD.gn` 中添加：
+
+```gn
+"8.0SHT:Sht20",
+```
+
+程序中使用信号量控制周期采样，每隔几秒读取一次 SHT20 的温度和湿度。读取到的数据会：
+
+```text
+1. 显示到 OLED 屏幕
+2. 通过 printf 输出到 UartAssist
+```
+
+串口输出格式类似：
+
+```text
+temperature = 26.35 C, humidity = 58.42%RH
+```
+
+OLED 上显示：
+
+```text
+SHT20
+Temp: 26.35 C
+Humi: 58.42%
+```
+
+## 4. 遇到的问题与解决
+
+### UART 库名冲突
+
+最开始 UART 工程中使用：
+
+```gn
+static_library("Uart")
+```
+
+编译时链接命令中出现两个 `-luart`，导致系统 UART 驱动库被重复链接，出现大量 multiple definition 错误。
+
+解决方法是把应用库名改成：
+
+```gn
+static_library("UartDemo")
+```
+
+父级 `features` 同步改为：
+
+```gn
+"5.0Uart:UartDemo",
+```
+
+### OLED 驱动文件路径错误
+
+编译时曾出现找不到：
+
+```text
+src/hal_bsp_ssd1306.c
+```
+
+原因是 `BUILD.gn` 中写了：
+
+```gn
+"src/hal_bsp_ssd1306.c"
+```
+
+但实际目录下没有 `src` 文件夹或文件没有放进去。
+
+解决方法是按要求建立：
+
+```text
+include
+src
+```
+
+并把 SSD1306 驱动文件放到对应目录。
+
+### BLE App 接收不到回显
+
+手机连接 JDY-16 后，Hi3861 能收到：
+
+```text
++CONNECTED
+```
+
+但手机端一开始收不到回显。原因是 BLE 调试 App 没有打开通知订阅。
+
+解决方法是在 BLE App 中打开：
+
+```text
+Notified Values -> Subscribe
+```
+
+之后手机就能收到 Hi3861 回传的 `HELLO`。
+
+### 多个实验同时启用导致冲突
+
+SHT20 工程中已经包含 OLED 驱动，如果同时启用 OLED 单独实验，可能会导致 `SSD1306_Init` 等函数重复定义。
+
+因此编译 SHT20 实验时，建议父级 `app/BUILD.gn` 中只保留当前实验：
+
+```gn
+features = [
+  "8.0SHT:Sht20",
+]
+```
+
+其他实验先注释掉。
+
+## 5. 今日总结
+
+今天完成了 Hi3861 的 UART、BLE、OLED 和 SHT20 温湿度采集相关实验。重点掌握了 UART1 的 GPIO 复用、BLE 透传模块的连接与通知订阅、OLED 驱动文件的引入方式、SHT20 的 I2C 采集流程，以及 GN 编译配置中目标名和路径必须严格对应的问题。
+
+
+# STM32部分
+
+今天主要完成了 NFC 读卡控制小车的功能调试，把 NFC 识别、电机前进、停车和灯光控制串了起来。
+
+一开始先对比了 NFC 示例程序和本地代码。示例里直接在串口接收逻辑中判断 `USART2_RX_BUF[19]` 到 `USART2_RX_BUF[22]`，而本地代码把这部分封装成了 `NFC_GetCardAction()` 这样的函数。虽然写法不一样，但本质都是判断 PN532 返回帧中的卡号字段。
+
+PN532 读卡返回的数据格式中，真正用来判断卡号的是第 19 到 22 位：
+
+```c
+buf[19]
+buf[20]
+buf[21]
+buf[22]
+```
+
+实际测试读出了两张卡：
+
+```text
+63:31:47:06
+CB:98:A6:05
+```
+
+其中 `63:31:47:06` 被设置为停止卡，`CB:98:A6:05` 被设置为前进卡。
+
+前进卡判断逻辑：
+
+```c
+if ((buf[19] == 0xCB) && (buf[20] == 0x98) &&
+    (buf[21] == 0xA6) && (buf[22] == 0x05)) {
+    return NFC_CARD_FORWARD;
+}
+```
+
+停止卡判断逻辑：
+
+```c
+if ((buf[19] == 0x63) && (buf[20] == 0x31) &&
+    (buf[21] == 0x47) && (buf[22] == 0x06)) {
+    return NFC_CARD_STOP;
+}
+```
+
+为了让 NFC 工程能够控制电机，把 PWM 工程里的电机驱动模块加入到了 NFC 工程中，包括：
+
+```text
+motor.c
+motor.h
+```
+
+并且在 Keil 工程文件中加入了 `motor.c` 和 motor 头文件路径。
+
+主函数中增加了 PWM 初始化：
+
+```c
+PWM_Init(PWM_MAX, 9);
+```
+
+这样 TIM4 的 PWM 输出才能正常工作。
+
+当前前进逻辑是：先用最大 PWM 启动一下，再降低到稳定前进速度：
+
+```c
+Set_Pwm(FORWARD_START_PWM, FORWARD_START_PWM);
+delay_ms(300);
+Set_Pwm(FORWARD_PWM, FORWARD_PWM);
+```
+
+其中：
+
+```c
+#define FORWARD_PWM       6000
+#define FORWARD_START_PWM PWM_MAX
+```
+
+停止卡扫描后执行：
+
+```c
+Motor_Stop();
+```
+
+同时停止卡还保留亮灯功能，所以刷停止卡时会停车，并切换灯光状态：
+
+```c
+Motor_Stop();
+
+if (led_flag == 0) {
+    led_flag = 1;
+    R_led_mode();
+} else {
+    led_flag = 0;
+    R_led_CLC();
+}
+```
+
+调试过程中串口输出能正确显示不同卡号，例如：
+
+```text
+00 00 FF 00 FF 00 00 00 FF 0C F4 D5 4B 01 01 00 04 08 04 CB 98 A6 05 C0 00
+NFC forward card
+```
+
+以及：
+
+```text
+00 00 FF 00 FF 00 00 00 FF 0C F4 D5 4B 01 01 00 04 08 04 63 31 47 06 ED 00
+NFC stop card
+```
+
+这说明 NFC 识别逻辑已经正常进入对应分支。
+
+一开始刷前进卡后电机没有转，但串口已经打印了 `NFC forward card`，说明程序逻辑没有问题。最后确认原因是小车电源开关没有打开。打开电源后，电机控制功能正常。
+
+最终实现效果：
+
+```text
+CB:98:A6:05    -> 小车前进
+63:31:47:06    -> 小车停止，同时切换灯光
+```
+
+今天的关键结论是：NFC 读卡本身只负责识别卡号，真正的动作需要在识别到不同卡号后分配不同的控制逻辑。通过把 NFC 判断结果转换成不同的动作类型，可以让同一个读卡流程控制小车前进、停止和灯光。
