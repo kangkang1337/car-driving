@@ -37,6 +37,20 @@ The current PWM range is:
 
 ```c
 #define PWM_MAX 3599
+# 2026-08-26
+
+# STM32部分
+
+## 今日目标
+
+基于 `STM32F103C8T6` 和小车原理图，完成 L9110S 电机驱动的 PWM 控制工程，并在 Keil 中形成一个可以烧写运行的项目。
+
+## 工程整理
+
+参考了原来的串口收发打印工程：
+
+```text
+C:\Users\18500\Desktop\summer\stm32\2_串口收发打印\2_串口收发打印
 ```
 
 The program calls:
