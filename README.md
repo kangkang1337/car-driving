@@ -1144,3 +1144,141 @@ CB:98:A6:05    -> 小车前进
 ```
 
 今天的关键结论是：NFC 读卡本身只负责识别卡号，真正的动作需要在识别到不同卡号后分配不同的控制逻辑。通过把 NFC 判断结果转换成不同的动作类型，可以让同一个读卡流程控制小车前进、停止和灯光。
+
+# 个人测试
+
+本实验目标：让小车在桌面上自动前进，利用左右两个红外对管检测桌面边缘，避免小车掉下桌子。
+
+## 硬件连接
+
+红外对管检测：
+
+```text
+左红外：GPIO14
+右红外：GPIO13
+```
+
+电机控制：
+
+```text
+Hi3861 UART2 TX：GPIO11
+Hi3861 UART2 RX：GPIO12
+UART2 波特率：115200
+```
+
+串口日志通过 `printf` 输出，可以在 UartAssist 中查看运行状态。
+
+## 红外检测逻辑
+
+实测结果：
+
+```text
+L=0, R=0：小车在桌面上，安全
+L=1, R=0：左侧检测到边缘
+L=0, R=1：右侧检测到边缘
+L=1, R=1：左右两侧都检测到边缘
+```
+
+因此程序判断逻辑为：
+
+```text
+只有 L=0 且 R=0 时继续前进
+只要 L 或 R 有一边不是 0，就立即停车并执行避边动作
+```
+
+## 小车运行流程
+
+当前程序流程：
+
+```text
+1. 小车起步
+2. 起步阶段使用较高速度 150，持续 300ms
+3. 起步后降为巡航速度 120 前进
+4. 前进过程中不断读取左右红外对管
+5. 只要检测到任意一侧到达边缘，立即停车
+6. 短暂停车 100ms
+7. 以速度 150 倒车 300ms
+8. 根据触发边缘的一侧进行转向
+9. 转向完成后继续前进
+10. 再次检测到边缘时重复以上过程
+```
+
+## 关键参数
+
+程序中的主要可调参数：
+
+```c
+#define BRAKE_TIME_MS 100
+#define BACKWARD_TIME_MS 300
+#define TURN_TIME_MS 450
+#define START_SPEED 150
+#define CRUISE_SPEED 120
+#define START_BOOST_TIME_MS 300
+#define BACKWARD_SPEED 150
+#define TURN_SPEED 120
+```
+
+含义：
+
+```text
+BRAKE_TIME_MS：检测到边缘后停车等待时间
+BACKWARD_TIME_MS：倒车持续时间
+TURN_TIME_MS：转向持续时间
+START_SPEED：起步速度
+CRUISE_SPEED：正常前进速度
+START_BOOST_TIME_MS：起步高速持续时间
+BACKWARD_SPEED：倒车速度
+TURN_SPEED：转向速度
+```
+
+## 调试记录
+
+最开始程序只读取 GPIO7，串口一直显示：
+
+```text
+IR status: waiting, no signal
+```
+
+后来查项目支持包发现红外对管使用的是 GPIO13 和 GPIO14，不是 GPIO7。GPIO7 和 GPIO8 是超声波模块使用的引脚。
+
+之后改成 GPIO13 / GPIO14 后，使用 `GpioGetInputVal()` 出现：
+
+```text
+errno=0x3612
+errno=0x3611
+```
+
+说明普通 `wifiiot_gpio` 包装接口读取 GPIO13 / GPIO14 不稳定，后来改用底层接口：
+
+```c
+hi_gpio_get_input_val(HI_GPIO_IDX_14, &state.left);
+hi_gpio_get_input_val(HI_GPIO_IDX_13, &state.right);
+```
+
+红外读取成功。
+
+## STM32 配合
+
+小车电机不是 Hi3861 直接控制的，而是：
+
+```text
+Hi3861 读取红外并做逻辑判断
+Hi3861 通过 UART2 向 STM32 发送电机控制指令
+STM32 接收指令后控制电机 PWM
+```
+
+Hi3861 发给 STM32 的数据帧格式：
+
+```text
+0xFC, 左轮方向, 左轮速度, 右轮方向, 右轮速度, 0xFD
+```
+
+例如：
+
+```text
+FC 00 78 00 78 FD：前进，左右速度 120
+FC 01 96 01 96 FD：倒车，左右速度 150
+FC 00 00 00 00 FD：停车
+```
+
+STM32 端需要烧录支持该协议的程序，否则 Hi3861 串口显示动作正常，但小车不会动。
