@@ -1284,5 +1284,4 @@ FC 00 00 00 00 FD：停车
 STM32 端需要烧录支持该协议的程序，否则 Hi3861 串口显示动作正常，但小车不会动。
 
 # 8.29
-Missing files updated.
-My high appreciation to the reminder.
+OLED显示和SHT20温湿度实验丢失文件上传完成，感谢邮件提醒。
