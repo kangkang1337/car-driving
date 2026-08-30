@@ -1281,6 +1281,222 @@ FC 01 96 01 96 FD：倒车，左右速度 150
 FC 00 00 00 00 FD：停车
 ```
 
+
+# 2026.08.30
+
+## 项目目标
+
+完成 `test2-sg90` 小车避障工程：
+
+- 小车默认前进
+- 超声波检测前方障碍物
+- 当前避障阈值：`20cm`
+- 前方 `<= 20cm` 时停止前进
+- 小车原地转向避障
+- 避障后继续前进
+- STM32 和 Hi3861 代码分别放在不同文件夹
+
+## 工程路径
+
+工程目录：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90
+```
+
+主要目录：
+
+```text
+Hi3861
+STM32
+```
+
+## Hi3861 负责内容
+
+Hi3861 主要负责：
+
+- 控制 SG90 舵机
+- 读取 HC-SR04 超声波距离
+- 判断是否有障碍物
+- 通过 UART 给 STM32 发送电机控制指令
+
+主要文件：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90\Hi3861\obstacle_avoidance.c
+```
+
+## STM32 负责内容
+
+STM32 主要负责：
+
+- 接收 Hi3861 发来的串口控制帧
+- 解析左右电机速度和方向
+- 使用 TIM4 PWM 控制 L9110S 电机驱动模块
+
+主要文件：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90\STM32\USER\TIMER.uvprojx
+```
+
+截图确认打开的工程路径是正确的：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90\STM32\USER\TIMER.uvprojx
+```
+
+## 使用到的引脚
+
+Hi3861：
+
+```text
+SG90 舵机信号线：GPIO2
+HC-SR04 Trig：GPIO7
+HC-SR04 Echo：GPIO8
+UART2_TX：GPIO11
+UART2_RX：GPIO12
+```
+
+STM32：
+
+```text
+USART1_RX：PA10
+USART1_TX：PA9
+
+USART2_RX：PA3
+USART2_TX：PA2
+
+左电机 PWM：PB7 / TIM4_CH2
+左电机方向：PB14
+
+右电机 PWM：PB6 / TIM4_CH1
+右电机方向：PB13
+```
+
+## 串口通信协议
+
+Hi3861 通过 UART2 给 STM32 发送 6 字节控制帧：
+
+```text
+0xFC, left_dir, left_speed, right_dir, right_speed, 0xFD
+```
+
+含义：
+
+```text
+0xFC：帧头
+left_dir：左电机方向，0 正转，1 反转
+left_speed：左电机速度，范围 0~150
+right_dir：右电机方向，0 正转，1 反转
+right_speed：右电机速度，范围 0~150
+0xFD：帧尾
+```
+
+STM32 接收到后会把速度值乘以 `20`，再写入 PWM。
+
+## 当前避障逻辑
+
+最终改成了比较简单稳定的逻辑：
+
+1. 上电初始化
+2. 先发送停车指令
+3. 等待 `200ms`
+4. 循环测量前方距离
+5. 如果距离有效且 `<= 20cm`
+   - 停车
+   - 舵机保持中位
+   - 小车原地右转
+   - 转一小段后停下重新测距
+   - 前方距离大于 `20cm` 后退出避障
+6. 如果前方距离大于 `20cm`
+   - 小车继续前进
+
+## 当前关键参数
+
+```c
+#define OBSTACLE_DISTANCE_CM 20.0f
+#define FORWARD_SPEED 150
+#define TURN_FAST_SPEED 150
+#define TURN_SLOW_SPEED (-50)
+#define TASK_DELAY_MS 120
+#define TURN_CHECK_DELAY_MS 120
+#define MAX_TURN_TIME_MS 1800
+```
+
+说明：
+
+- `OBSTACLE_DISTANCE_CM`：避障距离阈值
+- `FORWARD_SPEED`：前进速度
+- `TURN_FAST_SPEED` / `TURN_SLOW_SPEED`：原地转向速度组合
+- `TURN_CHECK_DELAY_MS`：每次原地转向持续时间
+- `MAX_TURN_TIME_MS`：最多原地转向时间
+
+## 已经修过的问题
+
+### 1. 电机完全不动
+
+原因判断：
+
+- 舵机能动，说明 Hi3861 程序在运行
+- 电机不动更可能是 STM32 没收到 Hi3861 的串口帧
+- 或者 STM32 工程没有重新烧录
+- 或串口接到了 USART2，但代码只监听 USART1
+
+处理：
+
+- STM32 改成 USART1 和 USART2 都能接收控制帧
+- 支持 PA10 和 PA3 两个接收口
+
+### 2. 左转右转相反
+
+原因判断：
+
+- 实车电机方向和代码定义方向相反
+- 或左右电机接线/安装方向和代码假设不一致
+
+处理：
+
+- 已经把左右转电机速度组合对调
+
+### 3. 开机完全不前进
+
+处理过程：
+
+- 为了避免 STM32 漏掉第一帧，曾加过开机连续发送前进帧
+- 后来发现会导致启动时停不下来
+- 最终删除开机强制前进
+- 改成开机先停车，再测距判断
+
+### 4. 倒车逻辑
+
+原本存在倒车兜底逻辑：
+
+```c
+CarBackward();
+```
+
+作用是防止原地转向后前方仍然太近，小车卡住。
+
+后来根据需求删除，当前逻辑不再倒车。
+
+## 当前注意事项
+
+烧录时需要注意：
+
+- Hi3861 侧代码要重新编译烧录
+- STM32 侧如果改过串口接收，也要重新 Build/Download
+- Hi3861 和 STM32 必须共地
+- Hi3861 `GPIO11/UART2_TX` 要接到 STM32 `PA10` 或 `PA3`
+- 如果电机方向仍然不对，优先调整 `CarTurnRight()` 里的左右电机速度组合
+
+当前重点文件：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90\Hi3861\obstacle_avoidance.c
+C:\Users\18500\Desktop\summer\test\test2-sg90\STM32\SYSTEM\usart\usart.c
+C:\Users\18500\Desktop\summer\test\test2-sg90\STM32\USER\main.c
+```
 STM32 端需要烧录支持该协议的程序，否则 Hi3861 串口显示动作正常，但小车不会动。
 
 # 8.29
