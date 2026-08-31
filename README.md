@@ -387,3 +387,216 @@ NFC led card
 ```
 
 After testing, the NFC card recognition worked correctly. The motor did not move at first because the car power switch was not turned on. After enabling the power, the NFC forward logic was confirmed to work.
+
+# 8.31
+
+## STM32 LED Receiver
+
+Implemented the STM32-side LED receiver for the AP3216C light control demo.
+
+## Project Path
+
+```text
+C:\Users\18500\Desktop\summer\SSH-192.168.13.128\9.0AP3216\led
+```
+
+## Main Files
+
+```text
+9.0AP3216\led\USER\main.c
+9.0AP3216\led\SYSTEM\usart\usart.c
+9.0AP3216\led\SYSTEM\usart\usart.h
+```
+
+## Function
+
+The STM32 receives LED control commands from the Hi3861 through USART1.
+
+Commands:
+
+```text
+L1 -> turn on all left and right WS2812 LEDs in white
+L0 -> turn off all left and right WS2812 LEDs
+```
+
+## UART Settings
+
+```text
+Baudrate: 9600
+USART: USART1
+TX: PA9
+RX: PA10
+```
+
+## LED Behavior
+
+- When the Hi3861 detects weak light or blocked light, it sends `L1`.
+- After receiving `L1`, the STM32 turns all car LEDs white.
+- When the Hi3861 detects light, it sends `L0`.
+- After receiving `L0`, the STM32 turns all car LEDs off.
+
+## Code Cleanup
+
+Removed unrelated logic from `main.c`, including:
+
+- motor control
+- encoder initialization
+- PWM motor output
+- `Motor_Stop()`
+- `Set_Pwm()`
+
+The STM32 `main.c` now only keeps the required initialization and LED control loop.
+
+# Project
+
+Updated the STM32 side of the `10.0SUM` smart car project.
+
+The STM32 now works as the motor and LED receiver. It receives commands from the Hi3861 through USART1 and controls:
+
+- Left and right motors
+- WS2812 colorful LEDs
+
+## Main Files
+
+- `10.0SUM/TIMER/USER/main.c`
+- `10.0SUM/TIMER/main.c`
+- `10.0SUM/TIMER/SYSTEM/usart/usart.c`
+- `10.0SUM/TIMER/SYSTEM/usart/usart.h`
+
+## UART Configuration
+
+STM32 uses USART1:
+
+```text
+Baud rate: 115200
+Data bits: 8
+Stop bits: 1
+Parity: none
+```
+
+Pins:
+
+```text
+PA9  = USART1 TX
+PA10 = USART1 RX
+```
+
+## Motor Control
+
+The STM32 receives a 6-byte motor frame from Hi3861:
+
+```text
+0xFC, left_dir, left_speed, right_dir, right_speed, 0xFD
+```
+
+Frame fields:
+
+```text
+left_dir / right_dir:
+0 = forward
+1 = reverse
+
+left_speed / right_speed:
+0 to 150
+```
+
+The STM32 converts the received speed to PWM:
+
+```c
+Set_Pwm(left_speed * 20, right_speed * 20);
+```
+
+Motor pins:
+
+```text
+Left motor PWM:       PB7 / TIM4_CH2
+Left motor direction: PB14
+
+Right motor PWM:       PB6 / TIM4_CH1
+Right motor direction: PB13
+```
+
+## LED Control
+
+The STM32 also supports the same LED commands used in the previous `9.0AP3216` project:
+
+```text
+L1 = turn LED on
+L0 = turn LED off
+```
+
+The LED command is parsed in the USART1 interrupt handler.
+
+When `L1` is received:
+
+```c
+LED_CMD = 1;
+```
+
+When `L0` is received:
+
+```c
+LED_CMD = 0;
+```
+
+The main loop checks `LED_CMD` and updates the WS2812 LEDs.
+
+## LED Behavior
+
+The car LEDs use the existing `colorful_led` driver.
+
+When LED is on:
+
+```c
+L_ws2812_rgb(i, WS_WHITE);
+R_ws2812_rgb(i, WS_WHITE);
+```
+
+When LED is off:
+
+```c
+L_ws2812_rgb(i, WS_DARK);
+R_ws2812_rgb(i, WS_DARK);
+```
+
+After updating LED colors, the program calls:
+
+```c
+L_ws2812_refresh(led_num);
+R_ws2812_refresh(led_num);
+```
+
+## Program Flow
+
+On startup, STM32 initializes:
+
+```text
+System clock
+NVIC priority group
+USART1 at 115200
+Delay
+Motor PWM
+WS2812 colorful LEDs
+SysTick
+```
+
+Then it prints:
+
+```text
+QST motor and LED UART receiver ready
+```
+
+The main loop does not directly drive the motors. Motors are controlled only when valid UART motor frames are received.
+
+## Notes
+
+The previous fixed-PWM test behavior was removed.
+
+Before this update, the STM32 program only received motor frames, so the LED did not respond. Now USART1 supports both:
+
+```text
+Motor frame: 0xFC ... 0xFD
+LED command: L1 / L0
+```
+
+Both the Hi3861 and STM32 firmware must be rebuilt and burned for LED control to work.
