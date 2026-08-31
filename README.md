@@ -368,3 +368,179 @@ Since the SHT20 project already includes the OLED driver, the standalone OLED ex
 ## Result
 
 By the end of the day, UART communication, BLE message receiving and echoing, OLED display, and SHT20 temperature-humidity output were all implemented and tested.
+
+# 8.31
+
+## Project Summary
+
+Integrated the final smart car project in `10.0SUM`.
+
+The project now includes:
+
+- Infrared pair table-edge detection to prevent the car from falling.
+- HC-SR04 ultrasonic obstacle avoidance.
+- SG90 servo scanning for left/right obstacle checking.
+- Basic Bluetooth UART communication.
+- OLED display for SHT20 temperature/humidity and AP3216C IR/ALS/PS data.
+- Serial logs showing which task is running and what it is doing.
+- STM32 motor control through UART frames.
+- STM32 LED control compatible with the previous `9.0AP3216` LED behavior.
+
+## Main Files
+
+Hi3861 side:
+
+- `10.0SUM/sum.c`
+- `10.0SUM/BUILD.gn`
+- `10.0SUM/include/hal_bsp_sht20.h`
+- `10.0SUM/src/hal_bsp_sht20.c`
+- `10.0SUM/src/hal_bsp_ap3216c.c`
+- `10.0SUM/src/hal_bsp_ssd1306.c`
+
+STM32 side:
+
+- `10.0SUM/TIMER/USER/main.c`
+- `10.0SUM/TIMER/SYSTEM/usart/usart.c`
+- `10.0SUM/TIMER/SYSTEM/usart/usart.h`
+
+## Runtime Behavior
+
+After boot, the Hi3861 serial output should include:
+
+```text
+10.0SUM project start.
+Task 1 running: car safety: IR edge protection + ultrasonic obstacle avoidance
+Task 2 running: OLED display: SHT20 temperature/humidity + AP3216C IR/ALS/PS
+Task 3 running: Bluetooth UART1 communication
+```
+
+If the serial port still prints:
+
+```text
+AP3216C ir=..., als=..., ps=..., led=...
+```
+
+then the board is still running the old `9.0AP3216` firmware instead of `10.0SUM`.
+
+## Hi3861 Build Target
+
+Use the final project target:
+
+```text
+10.0SUM:SumCar
+```
+
+Do not build or burn:
+
+```text
+9.0AP3216:Ap3216c
+```
+
+for the final smart car project.
+
+## STM32 Program
+
+The STM32 side receives commands from Hi3861 through UART at `115200` baud.
+
+Motor frame format:
+
+```text
+0xFC, left_dir, left_speed, right_dir, right_speed, 0xFD
+```
+
+Direction values:
+
+```text
+0 = forward
+1 = reverse
+```
+
+Speed range:
+
+```text
+0 to 150
+```
+
+The STM32 side also supports LED commands:
+
+```text
+L1 = LED on
+L0 = LED off
+```
+
+## Wiring
+
+Hi3861:
+
+- GPIO14: left infrared table-edge sensor
+- GPIO13: right infrared table-edge sensor
+- GPIO7: HC-SR04 Trig
+- GPIO8: HC-SR04 Echo
+- GPIO2: SG90 servo signal
+- GPIO11: UART2 TX to STM32 RX
+- GPIO12: UART2 RX from STM32 TX
+- GPIO0: Bluetooth UART1 TX
+- GPIO1: Bluetooth UART1 RX
+- GPIO9: I2C0 SCL
+- GPIO10: I2C0 SDA
+- GPIO6: local LED output
+
+STM32:
+
+- USART1 RX/TX: PA10 / PA9
+- Left motor PWM: PB7 / TIM4_CH2
+- Left motor direction: PB14
+- Right motor PWM: PB6 / TIM4_CH1
+- Right motor direction: PB13
+- WS2812 colorful LED control uses the existing `colorful_led` driver.
+
+## Important Parameters
+
+Infrared edge detection:
+
+```c
+#define IR_EDGE_VALUE HI_GPIO_VALUE1
+```
+
+If desktop and edge detection are reversed, change it to:
+
+```c
+#define IR_EDGE_VALUE HI_GPIO_VALUE0
+```
+
+Servo direction:
+
+```c
+#define SG90_LEFT_DUTY_US 2400
+#define SG90_CENTER_DUTY_US 1650
+#define SG90_RIGHT_DUTY_US 900
+```
+
+Obstacle threshold:
+
+```c
+#define OBSTACLE_DISTANCE_CM 20.0f
+```
+
+Edge protection timing:
+
+```c
+#define SAMPLE_PERIOD_MS 30
+#define BRAKE_TIME_MS 300
+#define BACKWARD_TIME_MS 50
+#define EDGE_TURN_TIME_MS 180
+```
+
+Obstacle avoidance timing:
+
+```c
+#define OBSTACLE_BACKWARD_TIME_MS 50
+#define OBSTACLE_TURN_TIME_MS 300
+#define MAX_OBSTACLE_TURN_TIME_MS 900
+```
+
+## Notes
+
+Both Hi3861 and STM32 firmware must be rebuilt and burned.
+
+The current local machine did not have the required Hi3861 or STM32 compiler tools available, so the code was updated and statically checked, but firmware binaries were not rebuilt here.
