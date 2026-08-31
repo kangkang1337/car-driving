@@ -371,6 +371,111 @@ By the end of the day, UART communication, BLE message receiving and echoing, OL
 
 # 8.31
 
+## AP3216C Light LED Demo
+
+Implemented an AP3216C-based light control demo under:
+
+```text
+C:\Users\18500\Desktop\summer\SSH-192.168.13.128\9.0AP3216
+```
+
+## Features
+
+- Reads ambient light data from the AP3216C sensor through I2C.
+- Prints sensor data to the serial terminal.
+- Displays sensor data and LED state on the OLED screen.
+- Uses ambient light intensity to control the car LEDs:
+  - When the light is blocked or weak, the LEDs turn on in white.
+  - When light is detected, the LEDs turn off.
+
+## Hi3861 Side
+
+Main project files:
+
+```text
+9.0AP3216\ap.c
+9.0AP3216\include\hal_bsp_ap3216c.h
+9.0AP3216\src\hal_bsp_ap3216c.c
+9.0AP3216\src\hal_bsp_ssd1306.c
+```
+
+The Hi3861 reads AP3216C data and prints output such as:
+
+```text
+AP3216C ir=4, als=338, ps=151, led=OFF
+AP3216C ir=1, als=6, ps=229, led=ON
+```
+
+The light threshold is:
+
+```text
+ALS <= 50: LED ON
+ALS > 50: LED OFF
+```
+
+## OLED Display
+
+The OLED displays:
+
+```text
+AP3216C
+ALS:xxx
+IR:xxx PS:xxx
+LED:ON/OFF
+```
+
+## UART Control
+
+The Hi3861 sends LED control commands to the STM32 through UART2:
+
+```text
+GPIO11: UART2 TX
+GPIO12: UART2 RX
+Baudrate: 9600
+```
+
+Commands:
+
+```text
+L1: turn on all car LEDs in white
+L0: turn off all car LEDs
+```
+
+## STM32 Side
+
+STM32 LED project path:
+
+```text
+9.0AP3216\led
+```
+
+Main files:
+
+```text
+9.0AP3216\led\USER\main.c
+9.0AP3216\led\SYSTEM\usart\usart.c
+9.0AP3216\led\SYSTEM\usart\usart.h
+```
+
+The STM32 receives UART commands from the Hi3861:
+
+```text
+L1 -> all left and right WS2812 LEDs turn white
+L0 -> all left and right WS2812 LEDs turn off
+```
+
+Unrelated motor, encoder, and PWM logic was removed from `main.c`.
+
+## Notes
+
+During testing, AP3216C initialization failed with:
+
+```text
+AP3216C reset failed, status=0x80001182
+```
+
+The issue was caused by the hardware connection. Replugging the data cable restored normal AP3216C output.
+
 ## Project Summary
 
 Integrated the final smart car project in `10.0SUM`.
