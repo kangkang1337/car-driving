@@ -1501,3 +1501,554 @@ STM32 端需要烧录支持该协议的程序，否则 Hi3861 串口显示动作
 
 # 8.29
 OLED显示和SHT20温湿度实验丢失文件上传完成，感谢邮件提醒。
+
+
+# 8.31
+
+## AP3216C 光照控制 LED 实验记录
+
+今天完成了 `9.0AP3216` 工程的 AP3216C 光照传感器实验，实现了光照采集、串口输出、OLED 显示，以及根据光照强度控制车上 LED 灯亮灭。
+
+## 实现功能
+
+本次工程主要实现以下功能：
+
+- 使用 AP3216C 传感器采集光照强度
+- 通过串口输出 AP3216C 采集到的数据
+- 通过 OLED 显示光照数据和 LED 状态
+- 根据光照强度控制 LED：
+  - 遮光或光照较弱时，LED 亮白灯
+  - 有光照时，LED 熄灭
+
+## Hi3861 部分
+
+Hi3861 负责读取 AP3216C 传感器数据，并根据光照值判断 LED 状态。
+
+主要使用的文件包括：
+
+```text
+9.0AP3216\ap.c
+9.0AP3216\include\hal_bsp_ap3216c.h
+9.0AP3216\src\hal_bsp_ap3216c.c
+9.0AP3216\src\hal_bsp_ssd1306.c
+```
+
+AP3216C 通过 I2C 与 Hi3861 通信：
+
+```text
+I2C0 SDA: GPIO10
+I2C0 SCL: GPIO9
+AP3216C 地址: 0x3C
+```
+
+程序运行后，串口会输出类似信息：
+
+```text
+AP3216C ir=4, als=338, ps=151, led=OFF
+AP3216C ir=1, als=6, ps=229, led=ON
+```
+
+其中：
+
+- `ir` 表示红外数据
+- `als` 表示环境光照强度
+- `ps` 表示接近传感器数据
+- `led` 表示当前 LED 状态
+
+本次使用 `als` 作为判断依据：
+
+```text
+als <= 50: LED ON
+als > 50: LED OFF
+```
+
+## OLED 显示
+
+OLED 用于实时显示 AP3216C 数据和 LED 状态。
+
+显示内容包括：
+
+```text
+AP3216C
+ALS:xxx
+IR:xxx PS:xxx
+LED:ON/OFF
+```
+
+这样可以不用一直看串口，也能直接从 OLED 上观察当前光照值和 LED 判断结果。
+
+## STM32 部分
+
+车上的 LED 灯由 STM32 控制，因此 Hi3861 在判断光照状态后，通过 UART 向 STM32 发送控制命令。
+
+STM32 工程路径为：
+
+```text
+9.0AP3216\led
+```
+
+主要文件：
+
+```text
+9.0AP3216\led\USER\main.c
+9.0AP3216\led\SYSTEM\usart\usart.c
+9.0AP3216\led\SYSTEM\usart\usart.h
+```
+
+串口配置：
+
+```text
+USART1
+波特率: 9600
+TX: PA9
+RX: PA10
+```
+
+Hi3861 发送命令：
+
+```text
+L1: 点亮车上左右两侧 WS2812 LED，显示白色
+L0: 熄灭车上左右两侧 WS2812 LED
+```
+
+STM32 接收到命令后，根据命令控制车灯：
+
+- 收到 `L1`：全部 LED 亮白灯
+- 收到 `L0`：全部 LED 熄灭
+
+## 问题记录
+
+调试过程中遇到 AP3216C 初始化失败的问题，串口输出：
+
+```text
+AP3216C reset failed, status=0x80001182
+AP3216C init failed
+```
+
+这个错误表示 Hi3861 通过 I2C 写 AP3216C 复位寄存器时失败，AP3216C 没有应答。
+
+排查后发现不是代码逻辑问题，而是硬件连接问题。重新插拔数据线后，AP3216C 可以正常输出数据。
+
+正常输出示例：
+
+```text
+AP3216C ir=4, als=338, ps=151, led=OFF
+AP3216C ir=1, als=6, ps=229, led=ON
+```
+
+## 代码整理
+
+后续对 STM32 的 `main.c` 做了整理，删除了与本实验无关的内容，包括：
+
+- 电机控制相关代码
+- 编码器初始化
+- PWM 输出
+- `Motor_Stop()`
+- `Set_Pwm()`
+
+整理后，STM32 端只保留串口接收和 LED 控制逻辑，使工程更清晰。
+
+
+# 传感器应用
+
+## 今日内容
+
+完成了 `10.0SUM` 智能小车综合工程的整合和调试。
+
+本工程将前面几个独立实验功能合并到同一个项目中，包括红外防跌落、超声波避障、SG90 舵机扫描、OLED 显示、SHT20 温湿度采集、AP3216C 三合一传感器采集、蓝牙串口通信、电机控制以及 LED 控制。
+
+## Hi3861 部分
+
+Hi3861 作为主控，负责传感器读取、避障判断和向 STM32 下发控制命令。
+
+主要文件：
+
+```text
+10.0SUM/sum.c
+10.0SUM/BUILD.gn
+10.0SUM/include/hal_bsp_sht20.h
+10.0SUM/src/hal_bsp_sht20.c
+10.0SUM/src/hal_bsp_ap3216c.c
+10.0SUM/src/hal_bsp_ssd1306.c
+```
+
+## STM32 部分
+
+STM32 作为执行端，负责接收 Hi3861 发来的串口命令，并控制电机和车灯。
+
+主要文件：
+
+```text
+10.0SUM/TIMER/USER/main.c
+10.0SUM/TIMER/main.c
+10.0SUM/TIMER/SYSTEM/usart/usart.c
+10.0SUM/TIMER/SYSTEM/usart/usart.h
+```
+
+STM32 串口波特率统一为：
+
+```text
+115200
+```
+
+## 功能实现
+
+### 1. 红外防跌落
+
+使用左右两个红外对管检测桌面边缘。
+
+引脚：
+
+```text
+GPIO14：左侧红外
+GPIO13：右侧红外
+```
+
+当前边缘触发电平：
+
+```c
+#define IR_EDGE_VALUE HI_GPIO_VALUE1
+```
+
+如果桌面和边缘判断反了，只需要改这一行：
+
+```c
+#define IR_EDGE_VALUE HI_GPIO_VALUE0
+```
+
+检测到边缘后，小车会执行：
+
+```text
+刹车
+后退
+向安全方向转弯
+继续前进
+```
+
+为了让刹车更及时，将采样周期缩短为：
+
+```c
+#define SAMPLE_PERIOD_MS 30
+```
+
+### 2. 超声波避障
+
+使用 HC-SR04 检测前方障碍物。
+
+引脚：
+
+```text
+GPIO7：Trig
+GPIO8：Echo
+```
+
+避障距离阈值：
+
+```c
+#define OBSTACLE_DISTANCE_CM 20.0f
+```
+
+当前逻辑：
+
+```text
+检测到前方障碍
+停车
+舵机左转测距
+舵机右转测距
+回中
+后退
+选择空间较大的方向转弯
+再次检测前方距离
+```
+
+### 3. SG90 舵机
+
+舵机信号引脚：
+
+```text
+GPIO2
+```
+
+当前角度 PWM：
+
+```c
+#define SG90_LEFT_DUTY_US 2400
+#define SG90_CENTER_DUTY_US 1650
+#define SG90_RIGHT_DUTY_US 900
+```
+
+调试时发现舵机左右方向反了，因此已经将左右 PWM 对调。
+
+### 4. OLED 显示
+
+OLED 用于显示 SHT20 和 AP3216C 的数据。
+
+I2C 引脚：
+
+```text
+GPIO9：I2C0 SCL
+GPIO10：I2C0 SDA
+```
+
+显示内容：
+
+```text
+SHT20 温度
+SHT20 湿度
+AP3216C IR
+AP3216C ALS
+AP3216C PS
+```
+
+OLED 每秒刷新一次。
+
+### 5. SHT20 温湿度检测
+
+SHT20 用于检测温度和湿度。
+
+显示格式类似：
+
+```text
+T:26.4C H:48.0%
+```
+
+串口打印格式类似：
+
+```text
+Task 2 running: OLED update, temp=26.4C humi=48.0% IR=11 ALS=429 PS=149 LED=OFF
+```
+
+### 6. AP3216C 数据检测
+
+AP3216C 读取三个值：
+
+```text
+IR：红外数据
+ALS：环境光数据
+PS：接近距离数据
+```
+
+其中 ALS 用于判断 LED 是否点亮。
+
+### 7. LED 控制
+
+LED 控制参考了 `9.0AP3216` 工程。
+
+Hi3861 本地 GPIO6 LED 逻辑：
+
+```text
+GPIO6
+高电平：灭
+低电平：亮
+```
+
+当环境光较暗时点亮：
+
+```c
+#define ALS_DARK_THRESHOLD 50
+```
+
+判断逻辑：
+
+```text
+ALS <= 50：LED ON
+ALS > 50：LED OFF
+```
+
+如果使用的是 STM32 车灯，则 Hi3861 会通过 UART2 给 STM32 发送：
+
+```text
+L1：开灯
+L0：关灯
+```
+
+STM32 端已经兼容该命令。
+
+### 8. 蓝牙通信
+
+蓝牙使用 Hi3861 UART1。
+
+引脚：
+
+```text
+GPIO0：UART1 TX
+GPIO1：UART1 RX
+```
+
+波特率：
+
+```text
+9600
+```
+
+当前支持简单命令：
+
+```text
+A：自动模式
+S：停止
+F：前进
+B：后退
+L：左转
+R：右转
+```
+
+如果 UART1 初始化失败，可能是 UART1 被调试串口或系统日志占用。
+
+### 9. 电机控制
+
+Hi3861 通过 UART2 向 STM32 发送电机控制帧。
+
+Hi3861 引脚：
+
+```text
+GPIO11：UART2 TX
+GPIO12：UART2 RX
+```
+
+波特率：
+
+```text
+115200
+```
+
+电机帧格式：
+
+```text
+0xFC, left_dir, left_speed, right_dir, right_speed, 0xFD
+```
+
+方向：
+
+```text
+0：正转
+1：反转
+```
+
+速度范围：
+
+```text
+0 到 150
+```
+
+STM32 收到后转换为 PWM：
+
+```c
+Set_Pwm(left_speed * 20, right_speed * 20);
+```
+
+## 串口任务打印
+
+程序会通过串口打印当前任务运行状态。
+
+示例：
+
+```text
+10.0SUM project start.
+Task 1 running: car safety: IR edge protection + ultrasonic obstacle avoidance
+Task 2 running: OLED display: SHT20 temperature/humidity + AP3216C IR/ALS/PS
+Task 3 running: Bluetooth UART1 communication
+```
+
+运行过程中还会打印：
+
+```text
+Task 1 running: car safety, IR L=... R=... distance=... cm mode=...
+Task 2 running: OLED update, temp=... humi=... IR=... ALS=... PS=... LED=...
+Task 3 running: Bluetooth recv: ...
+```
+
+## 调试记录
+
+### 旧程序未更新问题
+
+一开始串口仍然输出：
+
+```text
+AP3216C ir=..., als=..., ps=..., led=OFF
+```
+
+说明当时板子运行的还是 `9.0AP3216` 的旧程序，不是 `10.0SUM`。
+
+后来将 `BUILD.gn` 中目标名改为：
+
+```text
+SumCar
+```
+
+最终应编译烧录：
+
+```text
+10.0SUM:SumCar
+```
+
+### 红外判断反向问题
+
+调试中发现桌面和边缘检测反了，因此通过修改：
+
+```c
+#define IR_EDGE_VALUE HI_GPIO_VALUE1
+```
+
+来调整边缘触发电平。
+
+### 刹车过晚问题
+
+原先红外检测会受到超声波测距阻塞影响，导致边缘刹车偏晚。
+
+后来调整为：
+
+```text
+先读取红外
+先判断边缘
+如果安全，再进行超声波测距
+```
+
+并缩短采样周期，提高响应速度。
+
+### 舵机方向反向问题
+
+调试发现舵机左右方向反了，因此对调：
+
+```c
+#define SG90_LEFT_DUTY_US 2400
+#define SG90_RIGHT_DUTY_US 900
+```
+
+### LED 不亮问题
+
+LED 不亮的原因可能不是 Hi3861 GPIO6，而是使用的是 STM32 侧车灯。
+
+因此 STM32 端增加了对 `L1 / L0` 命令的解析，同时保留原有电机帧解析。
+
+现在 STM32 串口同时支持：
+
+```text
+0xFC ... 0xFD：电机控制
+L1：LED 开
+L0：LED 关
+```
+
+## 当前注意事项
+
+烧录时需要同时更新：
+
+```text
+Hi3861：10.0SUM:SumCar
+STM32：10.0SUM/TIMER/USER/main.c 所在 Keil 工程
+```
+
+如果只烧录 Hi3861，不更新 STM32，电机或车灯功能可能不会正常工作。
+
+如果 LED 仍不亮，需要确认当前使用的是：
+
+```text
+Hi3861 GPIO6 LED
+```
+
+还是：
+
+```text
+STM32 WS2812 车灯
+```
+
+两者的控制方式不同。
