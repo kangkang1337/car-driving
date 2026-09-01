@@ -2052,3 +2052,246 @@ STM32 WS2812 车灯
 ```
 
 两者的控制方式不同。
+
+
+# 9.1
+
+## 今日工作内容
+
+今天主要完成了小车数据上云、网页实时显示，以及上报延迟问题的排查和修正。
+
+## 华为云 MQTT 上报
+
+小车已经成功连接 WiFi，并通过 MQTT 将实时数据上传到华为云 IoTDA。
+
+上报内容包括：
+
+```text
+temperature
+humidity
+ap_ir
+ap_als
+ap_ps
+edge_left
+edge_right
+distance_cm
+led_on
+```
+
+串口出现以下日志时，说明 MQTT 连接和数据上报成功：
+
+```text
+Task 4 running: Huawei Cloud MQTT connected
+Task 4 running: Huawei Cloud data upload OK
+```
+
+过程中遇到过 `MQTT CONNACK failed, code=4`，原因是 MQTT clientId 中的时间戳校验导致密码过期。后来改用不校验时间戳的 clientId：
+
+```text
+6a9643457f2e6c302f94fcf9_qstcar_0_0_2026090104
+```
+
+避免了长时间运行后因时间戳失效导致连接失败。
+
+## 网页实时数据展示
+
+在目录：
+
+```text
+C:\Users\18500\Desktop\summer\test\test3-html
+```
+
+完成了一个基于 Vue 和 Java 的网页后端工程。
+
+主要文件：
+
+```text
+car.html
+CarCloudServer.java
+pom.xml
+README_WEB.md
+```
+
+网页功能包括：
+
+```text
+显示小车实时数据
+绘制温湿度折线图
+绘制 AP3216C 光照、红外、接近值折线图
+绘制超声波距离折线图
+显示红外边界和 LED 状态
+显示 Cloud Event、Cloud Age、AMQP Count、AMQP Delta
+```
+
+页面地址：
+
+```text
+http://localhost:8080/car.html
+```
+
+## 华为云数据读取方式调整
+
+最开始后端通过 IoTDA 设备影子接口读取数据：
+
+```text
+/v5/iot/{project_id}/devices/{device_id}/shadow
+```
+
+该方式能够读到云端数据，但延迟较大，`Cloud Event` 经常几十秒才变化一次，不适合实时折线图。
+
+后来改为使用华为云 IoTDA 的 AMQP 数据转发队列。
+
+AMQP 配置：
+
+```text
+host: 3c95083845.st1.iotda-app.cn-north-4.myhuaweicloud.com
+port: 5671
+queue: qst_queue
+instance_id: 5357e9ef-bcdf-4934-9c94-2924c34fde2b
+```
+
+AMQP 接入凭证：
+
+```text
+access_key: JpadGfUK
+access_code: hDDms2ZYfrMfXvRpqgfUW2tJqnSUya8D
+```
+
+Java 后端使用 Maven 和 Apache Qpid JMS 连接 AMQP 队列。连接成功时日志为：
+
+```text
+connected to server: amqps://3c95083845.st1.iotda-app.cn-north-4.myhuaweicloud.com:5671
+```
+
+## AMQP 延迟问题排查
+
+网页中加入了诊断字段：
+
+```text
+AMQP Count
+AMQP Delta
+Cloud Age
+```
+
+用于判断数据延迟来自哪里。
+
+一开始 AMQP Delta 约为：
+
+```text
+50 s
+```
+
+说明 Java 后端已经连接队列，但队列大约 50 秒才收到一条新消息。
+
+继续查看小车串口后发现：
+
+```text
+Task 4 running: Huawei Cloud data upload OK
+```
+
+本身也是约 50 秒打印一次，因此问题不在网页和 AMQP，而在小车端延时逻辑。
+
+## osDelay Tick 问题修正
+
+原代码中使用：
+
+```c
+osDelay(5000);
+```
+
+期望延时 5000 ms，也就是 5 秒。
+
+但在当前 Hi3861/CMSIS-RTOS 环境中，`osDelay()` 的参数是 OS tick，不是毫秒。当前 1 tick 约为 10 ms，所以：
+
+```text
+osDelay(5000) 实际约等于 50 秒
+```
+
+这导致：
+
+```text
+Task4 云端上报 5 秒变成约 50 秒
+Task2 OLED 1 秒更新变成约 10 秒
+Task1 安全任务循环也被放慢
+```
+
+为修正该问题，在 `sum.c` 中加入：
+
+```c
+#define OS_TICK_MS 10
+
+static void DelayMs(uint32_t ms)
+{
+    uint32_t ticks = (ms + OS_TICK_MS - 1) / OS_TICK_MS;
+    osDelay(ticks == 0 ? 1 : ticks);
+}
+```
+
+并将所有 `osDelay(...)` 替换为：
+
+```c
+DelayMs(...)
+```
+
+之后将云端上报周期改为：
+
+```c
+#define CLOUD_UPLOAD_PERIOD_MS 2000
+```
+
+即 2 秒上报一次。
+
+## 边界抽动问题修正
+
+修正 `osDelay` 后，所有运动动作恢复真实毫秒语义，导致原先边界避让参数过短。
+
+原参数：
+
+```c
+#define BACKWARD_TIME_MS 80
+#define EDGE_TURN_TIME_MS 180
+```
+
+修正 tick 后，实际就只有 80 ms 和 180 ms，小车还没离开桌沿就恢复判断，导致在边界处反复刹车、后退、转向，表现为抽动。
+
+因此调整为：
+
+```c
+#define BACKWARD_TIME_MS 350
+#define EDGE_TURN_TIME_MS 350
+#define EDGE_RELEASE_TIME_MS 250
+```
+
+并加入连续安全检测逻辑：红外传感器必须连续检测到安全状态 250 ms 后，才允许恢复前进。
+
+## 当前状态
+
+目前已经完成：
+
+```text
+小车 WiFi 连接
+华为云 MQTT 上报
+AMQP 数据转发接入
+Java 后端读取 AMQP 队列
+Vue 网页实时折线图展示
+2 秒云端上报周期配置
+osDelay tick 问题修正
+边界抽动问题初步修正
+```
+
+后续实车验证重点：
+
+```text
+确认 Task4 是否约 2 秒打印一次 data upload OK
+确认网页 AMQP Delta 是否降到约 2 秒
+确认边界避让是否稳定
+确认超声波避障动作是否因为真实毫秒延时变短
+```
+
+如果超声波避障转向不足，可继续调整：
+
+```c
+#define OBSTACLE_BACKWARD_TIME_MS 250
+#define OBSTACLE_TURN_TIME_MS 500
+#define MAX_OBSTACLE_TURN_TIME_MS 1500
+```
