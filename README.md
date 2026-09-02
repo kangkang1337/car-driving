@@ -1283,3 +1283,1250 @@ FC 00 00 00 00 FD：停车
 
 STM32 端需要烧录支持该协议的程序，否则 Hi3861 串口显示动作正常，但小车不会动。
 files that hadn't been updated correctly or some refined codes
+
+
+# 2026.08.30
+
+## 项目目标
+
+完成 `test2-sg90` 小车避障工程：
+
+- 小车默认前进
+- 超声波检测前方障碍物
+- 当前避障阈值：`20cm`
+- 前方 `<= 20cm` 时停止前进
+- 小车原地转向避障
+- 避障后继续前进
+- STM32 和 Hi3861 代码分别放在不同文件夹
+
+## 工程路径
+
+工程目录：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90
+```
+
+主要目录：
+
+```text
+Hi3861
+STM32
+```
+
+## Hi3861 负责内容
+
+Hi3861 主要负责：
+
+- 控制 SG90 舵机
+- 读取 HC-SR04 超声波距离
+- 判断是否有障碍物
+- 通过 UART 给 STM32 发送电机控制指令
+
+主要文件：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90\Hi3861\obstacle_avoidance.c
+```
+
+## STM32 负责内容
+
+STM32 主要负责：
+
+- 接收 Hi3861 发来的串口控制帧
+- 解析左右电机速度和方向
+- 使用 TIM4 PWM 控制 L9110S 电机驱动模块
+
+主要文件：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90\STM32\USER\TIMER.uvprojx
+```
+
+截图确认打开的工程路径是正确的：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90\STM32\USER\TIMER.uvprojx
+```
+
+## 使用到的引脚
+
+Hi3861：
+
+```text
+SG90 舵机信号线：GPIO2
+HC-SR04 Trig：GPIO7
+HC-SR04 Echo：GPIO8
+UART2_TX：GPIO11
+UART2_RX：GPIO12
+```
+
+STM32：
+
+```text
+USART1_RX：PA10
+USART1_TX：PA9
+
+USART2_RX：PA3
+USART2_TX：PA2
+
+左电机 PWM：PB7 / TIM4_CH2
+左电机方向：PB14
+
+右电机 PWM：PB6 / TIM4_CH1
+右电机方向：PB13
+```
+
+## 串口通信协议
+
+Hi3861 通过 UART2 给 STM32 发送 6 字节控制帧：
+
+```text
+0xFC, left_dir, left_speed, right_dir, right_speed, 0xFD
+```
+
+含义：
+
+```text
+0xFC：帧头
+left_dir：左电机方向，0 正转，1 反转
+left_speed：左电机速度，范围 0~150
+right_dir：右电机方向，0 正转，1 反转
+right_speed：右电机速度，范围 0~150
+0xFD：帧尾
+```
+
+STM32 接收到后会把速度值乘以 `20`，再写入 PWM。
+
+## 当前避障逻辑
+
+最终改成了比较简单稳定的逻辑：
+
+1. 上电初始化
+2. 先发送停车指令
+3. 等待 `200ms`
+4. 循环测量前方距离
+5. 如果距离有效且 `<= 20cm`
+   - 停车
+   - 舵机保持中位
+   - 小车原地右转
+   - 转一小段后停下重新测距
+   - 前方距离大于 `20cm` 后退出避障
+6. 如果前方距离大于 `20cm`
+   - 小车继续前进
+
+## 当前关键参数
+
+```c
+#define OBSTACLE_DISTANCE_CM 20.0f
+#define FORWARD_SPEED 150
+#define TURN_FAST_SPEED 150
+#define TURN_SLOW_SPEED (-50)
+#define TASK_DELAY_MS 120
+#define TURN_CHECK_DELAY_MS 120
+#define MAX_TURN_TIME_MS 1800
+```
+
+说明：
+
+- `OBSTACLE_DISTANCE_CM`：避障距离阈值
+- `FORWARD_SPEED`：前进速度
+- `TURN_FAST_SPEED` / `TURN_SLOW_SPEED`：原地转向速度组合
+- `TURN_CHECK_DELAY_MS`：每次原地转向持续时间
+- `MAX_TURN_TIME_MS`：最多原地转向时间
+
+## 已经修过的问题
+
+### 1. 电机完全不动
+
+原因判断：
+
+- 舵机能动，说明 Hi3861 程序在运行
+- 电机不动更可能是 STM32 没收到 Hi3861 的串口帧
+- 或者 STM32 工程没有重新烧录
+- 或串口接到了 USART2，但代码只监听 USART1
+
+处理：
+
+- STM32 改成 USART1 和 USART2 都能接收控制帧
+- 支持 PA10 和 PA3 两个接收口
+
+### 2. 左转右转相反
+
+原因判断：
+
+- 实车电机方向和代码定义方向相反
+- 或左右电机接线/安装方向和代码假设不一致
+
+处理：
+
+- 已经把左右转电机速度组合对调
+
+### 3. 开机完全不前进
+
+处理过程：
+
+- 为了避免 STM32 漏掉第一帧，曾加过开机连续发送前进帧
+- 后来发现会导致启动时停不下来
+- 最终删除开机强制前进
+- 改成开机先停车，再测距判断
+
+### 4. 倒车逻辑
+
+原本存在倒车兜底逻辑：
+
+```c
+CarBackward();
+```
+
+作用是防止原地转向后前方仍然太近，小车卡住。
+
+后来根据需求删除，当前逻辑不再倒车。
+
+## 当前注意事项
+
+烧录时需要注意：
+
+- Hi3861 侧代码要重新编译烧录
+- STM32 侧如果改过串口接收，也要重新 Build/Download
+- Hi3861 和 STM32 必须共地
+- Hi3861 `GPIO11/UART2_TX` 要接到 STM32 `PA10` 或 `PA3`
+- 如果电机方向仍然不对，优先调整 `CarTurnRight()` 里的左右电机速度组合
+
+当前重点文件：
+
+```text
+C:\Users\18500\Desktop\summer\test\test2-sg90\Hi3861\obstacle_avoidance.c
+C:\Users\18500\Desktop\summer\test\test2-sg90\STM32\SYSTEM\usart\usart.c
+C:\Users\18500\Desktop\summer\test\test2-sg90\STM32\USER\main.c
+```
+
+
+# 8.31
+
+## AP3216C 光照控制 LED 实验记录
+
+今天完成了 `9.0AP3216` 工程的 AP3216C 光照传感器实验，实现了光照采集、串口输出、OLED 显示，以及根据光照强度控制车上 LED 灯亮灭。
+
+## 实现功能
+
+本次工程主要实现以下功能：
+
+- 使用 AP3216C 传感器采集光照强度
+- 通过串口输出 AP3216C 采集到的数据
+- 通过 OLED 显示光照数据和 LED 状态
+- 根据光照强度控制 LED：
+  - 遮光或光照较弱时，LED 亮白灯
+  - 有光照时，LED 熄灭
+
+## Hi3861 部分
+
+Hi3861 负责读取 AP3216C 传感器数据，并根据光照值判断 LED 状态。
+
+主要使用的文件包括：
+
+```text
+9.0AP3216\ap.c
+9.0AP3216\include\hal_bsp_ap3216c.h
+9.0AP3216\src\hal_bsp_ap3216c.c
+9.0AP3216\src\hal_bsp_ssd1306.c
+```
+
+AP3216C 通过 I2C 与 Hi3861 通信：
+
+```text
+I2C0 SDA: GPIO10
+I2C0 SCL: GPIO9
+AP3216C 地址: 0x3C
+```
+
+程序运行后，串口会输出类似信息：
+
+```text
+AP3216C ir=4, als=338, ps=151, led=OFF
+AP3216C ir=1, als=6, ps=229, led=ON
+```
+
+其中：
+
+- `ir` 表示红外数据
+- `als` 表示环境光照强度
+- `ps` 表示接近传感器数据
+- `led` 表示当前 LED 状态
+
+本次使用 `als` 作为判断依据：
+
+```text
+als <= 50: LED ON
+als > 50: LED OFF
+```
+
+## OLED 显示
+
+OLED 用于实时显示 AP3216C 数据和 LED 状态。
+
+显示内容包括：
+
+```text
+AP3216C
+ALS:xxx
+IR:xxx PS:xxx
+LED:ON/OFF
+```
+
+这样可以不用一直看串口，也能直接从 OLED 上观察当前光照值和 LED 判断结果。
+
+## STM32 部分
+
+车上的 LED 灯由 STM32 控制，因此 Hi3861 在判断光照状态后，通过 UART 向 STM32 发送控制命令。
+
+STM32 工程路径为：
+
+```text
+9.0AP3216\led
+```
+
+主要文件：
+
+```text
+9.0AP3216\led\USER\main.c
+9.0AP3216\led\SYSTEM\usart\usart.c
+9.0AP3216\led\SYSTEM\usart\usart.h
+```
+
+串口配置：
+
+```text
+USART1
+波特率: 9600
+TX: PA9
+RX: PA10
+```
+
+Hi3861 发送命令：
+
+```text
+L1: 点亮车上左右两侧 WS2812 LED，显示白色
+L0: 熄灭车上左右两侧 WS2812 LED
+```
+
+STM32 接收到命令后，根据命令控制车灯：
+
+- 收到 `L1`：全部 LED 亮白灯
+- 收到 `L0`：全部 LED 熄灭
+
+## 问题记录
+
+调试过程中遇到 AP3216C 初始化失败的问题，串口输出：
+
+```text
+AP3216C reset failed, status=0x80001182
+AP3216C init failed
+```
+
+这个错误表示 Hi3861 通过 I2C 写 AP3216C 复位寄存器时失败，AP3216C 没有应答。
+
+排查后发现不是代码逻辑问题，而是硬件连接问题。重新插拔数据线后，AP3216C 可以正常输出数据。
+
+正常输出示例：
+
+```text
+AP3216C ir=4, als=338, ps=151, led=OFF
+AP3216C ir=1, als=6, ps=229, led=ON
+```
+
+## 代码整理
+
+后续对 STM32 的 `main.c` 做了整理，删除了与本实验无关的内容，包括：
+
+- 电机控制相关代码
+- 编码器初始化
+- PWM 输出
+- `Motor_Stop()`
+- `Set_Pwm()`
+
+整理后，STM32 端只保留串口接收和 LED 控制逻辑，使工程更清晰。# 8.31
+
+## AP3216C 光照控制 LED 实验记录
+
+今天完成了 `9.0AP3216` 工程的 AP3216C 光照传感器实验，实现了光照采集、串口输出、OLED 显示，以及根据光照强度控制车上 LED 灯亮灭。
+
+## 实现功能
+
+本次工程主要实现以下功能：
+
+- 使用 AP3216C 传感器采集光照强度
+- 通过串口输出 AP3216C 采集到的数据
+- 通过 OLED 显示光照数据和 LED 状态
+- 根据光照强度控制 LED：
+  - 遮光或光照较弱时，LED 亮白灯
+  - 有光照时，LED 熄灭
+
+## Hi3861 部分
+
+Hi3861 负责读取 AP3216C 传感器数据，并根据光照值判断 LED 状态。
+
+主要使用的文件包括：
+
+```text
+9.0AP3216\ap.c
+9.0AP3216\include\hal_bsp_ap3216c.h
+9.0AP3216\src\hal_bsp_ap3216c.c
+9.0AP3216\src\hal_bsp_ssd1306.c
+```
+
+AP3216C 通过 I2C 与 Hi3861 通信：
+
+```text
+I2C0 SDA: GPIO10
+I2C0 SCL: GPIO9
+AP3216C 地址: 0x3C
+```
+
+程序运行后，串口会输出类似信息：
+
+```text
+AP3216C ir=4, als=338, ps=151, led=OFF
+AP3216C ir=1, als=6, ps=229, led=ON
+```
+
+其中：
+
+- `ir` 表示红外数据
+- `als` 表示环境光照强度
+- `ps` 表示接近传感器数据
+- `led` 表示当前 LED 状态
+
+本次使用 `als` 作为判断依据：
+
+```text
+als <= 50: LED ON
+als > 50: LED OFF
+```
+
+## OLED 显示
+
+OLED 用于实时显示 AP3216C 数据和 LED 状态。
+
+显示内容包括：
+
+```text
+AP3216C
+ALS:xxx
+IR:xxx PS:xxx
+LED:ON/OFF
+```
+
+这样可以不用一直看串口，也能直接从 OLED 上观察当前光照值和 LED 判断结果。
+
+## STM32 部分
+
+车上的 LED 灯由 STM32 控制，因此 Hi3861 在判断光照状态后，通过 UART 向 STM32 发送控制命令。
+
+STM32 工程路径为：
+
+```text
+9.0AP3216\led
+```
+
+主要文件：
+
+```text
+9.0AP3216\led\USER\main.c
+9.0AP3216\led\SYSTEM\usart\usart.c
+9.0AP3216\led\SYSTEM\usart\usart.h
+```
+
+串口配置：
+
+```text
+USART1
+波特率: 9600
+TX: PA9
+RX: PA10
+```
+
+Hi3861 发送命令：
+
+```text
+L1: 点亮车上左右两侧 WS2812 LED，显示白色
+L0: 熄灭车上左右两侧 WS2812 LED
+```
+
+STM32 接收到命令后，根据命令控制车灯：
+
+- 收到 `L1`：全部 LED 亮白灯
+- 收到 `L0`：全部 LED 熄灭
+
+## 问题记录
+
+调试过程中遇到 AP3216C 初始化失败的问题，串口输出：
+
+```text
+AP3216C reset failed, status=0x80001182
+AP3216C init failed
+```
+
+这个错误表示 Hi3861 通过 I2C 写 AP3216C 复位寄存器时失败，AP3216C 没有应答。
+
+排查后发现不是代码逻辑问题，而是硬件连接问题。重新插拔数据线后，AP3216C 可以正常输出数据。
+
+正常输出示例：
+
+```text
+AP3216C ir=4, als=338, ps=151, led=OFF
+AP3216C ir=1, als=6, ps=229, led=ON
+```
+
+## 代码整理
+
+后续对 STM32 的 `main.c` 做了整理，删除了与本实验无关的内容，包括：
+
+- 电机控制相关代码
+- 编码器初始化
+- PWM 输出
+- `Motor_Stop()`
+- `Set_Pwm()`
+
+整理后，STM32 端只保留串口接收和 LED 控制逻辑，使工程更清晰。
+
+
+# 9.1
+
+## 今日工作内容
+
+今天主要完成了小车数据上云、网页实时显示，以及上报延迟问题的排查和修正。
+
+## 华为云 MQTT 上报
+
+小车已经成功连接 WiFi，并通过 MQTT 将实时数据上传到华为云 IoTDA。
+
+上报内容包括：
+
+```text
+temperature
+humidity
+ap_ir
+ap_als
+ap_ps
+edge_left
+edge_right
+distance_cm
+led_on
+```
+
+串口出现以下日志时，说明 MQTT 连接和数据上报成功：
+
+```text
+Task 4 running: Huawei Cloud MQTT connected
+Task 4 running: Huawei Cloud data upload OK
+```
+
+过程中遇到过 `MQTT CONNACK failed, code=4`，原因是 MQTT clientId 中的时间戳校验导致密码过期。后来改用不校验时间戳的 clientId：
+
+```text
+6a9643457f2e6c302f94fcf9_qstcar_0_0_2026090104
+```
+
+避免了长时间运行后因时间戳失效导致连接失败。
+
+## 网页实时数据展示
+
+在目录：
+
+```text
+C:\Users\18500\Desktop\summer\test\test3-html
+```
+
+完成了一个基于 Vue 和 Java 的网页后端工程。
+
+主要文件：
+
+```text
+car.html
+CarCloudServer.java
+pom.xml
+README_WEB.md
+```
+
+网页功能包括：
+
+```text
+显示小车实时数据
+绘制温湿度折线图
+绘制 AP3216C 光照、红外、接近值折线图
+绘制超声波距离折线图
+显示红外边界和 LED 状态
+显示 Cloud Event、Cloud Age、AMQP Count、AMQP Delta
+```
+
+页面地址：
+
+```text
+http://localhost:8080/car.html
+```
+
+## 华为云数据读取方式调整
+
+最开始后端通过 IoTDA 设备影子接口读取数据：
+
+```text
+/v5/iot/{project_id}/devices/{device_id}/shadow
+```
+
+该方式能够读到云端数据，但延迟较大，`Cloud Event` 经常几十秒才变化一次，不适合实时折线图。
+
+后来改为使用华为云 IoTDA 的 AMQP 数据转发队列。
+
+AMQP 配置：
+
+```text
+host: 3c95083845.st1.iotda-app.cn-north-4.myhuaweicloud.com
+port: 5671
+queue: qst_queue
+instance_id: 5357e9ef-bcdf-4934-9c94-2924c34fde2b
+```
+
+AMQP 接入凭证：
+
+```text
+access_key: JpadGfUK
+access_code: hDDms2ZYfrMfXvRpqgfUW2tJqnSUya8D
+```
+
+Java 后端使用 Maven 和 Apache Qpid JMS 连接 AMQP 队列。连接成功时日志为：
+
+```text
+connected to server: amqps://3c95083845.st1.iotda-app.cn-north-4.myhuaweicloud.com:5671
+```
+
+## AMQP 延迟问题排查
+
+网页中加入了诊断字段：
+
+```text
+AMQP Count
+AMQP Delta
+Cloud Age
+```
+
+用于判断数据延迟来自哪里。
+
+一开始 AMQP Delta 约为：
+
+```text
+50 s
+```
+
+说明 Java 后端已经连接队列，但队列大约 50 秒才收到一条新消息。
+
+继续查看小车串口后发现：
+
+```text
+Task 4 running: Huawei Cloud data upload OK
+```
+
+本身也是约 50 秒打印一次，因此问题不在网页和 AMQP，而在小车端延时逻辑。
+
+## osDelay Tick 问题修正
+
+原代码中使用：
+
+```c
+osDelay(5000);
+```
+
+期望延时 5000 ms，也就是 5 秒。
+
+但在当前 Hi3861/CMSIS-RTOS 环境中，`osDelay()` 的参数是 OS tick，不是毫秒。当前 1 tick 约为 10 ms，所以：
+
+```text
+osDelay(5000) 实际约等于 50 秒
+```
+
+这导致：
+
+```text
+Task4 云端上报 5 秒变成约 50 秒
+Task2 OLED 1 秒更新变成约 10 秒
+Task1 安全任务循环也被放慢
+```
+
+为修正该问题，在 `sum.c` 中加入：
+
+```c
+#define OS_TICK_MS 10
+
+static void DelayMs(uint32_t ms)
+{
+    uint32_t ticks = (ms + OS_TICK_MS - 1) / OS_TICK_MS;
+    osDelay(ticks == 0 ? 1 : ticks);
+}
+```
+
+并将所有 `osDelay(...)` 替换为：
+
+```c
+DelayMs(...)
+```
+
+之后将云端上报周期改为：
+
+```c
+#define CLOUD_UPLOAD_PERIOD_MS 2000
+```
+
+即 2 秒上报一次。
+
+## 边界抽动问题修正
+
+修正 `osDelay` 后，所有运动动作恢复真实毫秒语义，导致原先边界避让参数过短。
+
+原参数：
+
+```c
+#define BACKWARD_TIME_MS 80
+#define EDGE_TURN_TIME_MS 180
+```
+
+修正 tick 后，实际就只有 80 ms 和 180 ms，小车还没离开桌沿就恢复判断，导致在边界处反复刹车、后退、转向，表现为抽动。
+
+因此调整为：
+
+```c
+#define BACKWARD_TIME_MS 350
+#define EDGE_TURN_TIME_MS 350
+#define EDGE_RELEASE_TIME_MS 250
+```
+
+并加入连续安全检测逻辑：红外传感器必须连续检测到安全状态 250 ms 后，才允许恢复前进。
+
+## 当前状态
+
+目前已经完成：
+
+```text
+小车 WiFi 连接
+华为云 MQTT 上报
+AMQP 数据转发接入
+Java 后端读取 AMQP 队列
+Vue 网页实时折线图展示
+2 秒云端上报周期配置
+osDelay tick 问题修正
+边界抽动问题初步修正
+```
+
+后续实车验证重点：
+
+```text
+确认 Task4 是否约 2 秒打印一次 data upload OK
+确认网页 AMQP Delta 是否降到约 2 秒
+确认边界避让是否稳定
+确认超声波避障动作是否因为真实毫秒延时变短
+```
+
+如果超声波避障转向不足，可继续调整：
+
+```c
+#define OBSTACLE_BACKWARD_TIME_MS 250
+#define OBSTACLE_TURN_TIME_MS 500
+#define MAX_OBSTACLE_TURN_TIME_MS 1500
+```
+
+
+# 9.2
+
+## 项目目标
+
+使用手机蓝牙调试工具控制小车运动。手机通过蓝牙模块连接 Hi3861，Hi3861 接收控制指令后，再控制 STM32，最终由 STM32 驱动小车电机。
+
+整体控制链路：
+
+```text
+手机 LightBlue
+  -> 蓝牙模块
+  -> Hi3861
+  -> STM32
+  -> 电机
+```
+
+## 手机端控制协议
+
+手机端发送单个 ASCII 字符控制小车：
+
+```text
+O：停止
+W：前进
+A：左转
+D：右转
+S：后退
+I：低速前进
+K：高速前进
+```
+
+## 最初遇到的问题
+
+一开始烧录后，串口打印的是之前综合实验的日志：
+
+```text
+10.0SUM project start.
+Task 1 running: car safety...
+Task 2 running: OLED...
+Task 3 running: WiFi connect
+Task 4 running: Huawei Cloud MQTT...
+```
+
+说明板子里运行的不是蓝牙控制程序，而是之前的 `10.0SUM` 程序。
+
+原因是 `BUILD.gn` 没有保存，构建时仍然链接了旧模块。
+
+修正后，构建配置中启用：
+
+```gn
+"11.0_bluetooth:bluetooth"
+```
+
+重新编译烧录后，启动日志变为：
+
+```text
+UART1 example start.
+```
+
+说明已经烧录到蓝牙 UART 示例程序。
+
+## BUILD.gn 配置
+
+应用层 `BUILD.gn` 中只保留蓝牙工程：
+
+```gn
+lite_component("app") {
+    features = [
+        "11.0_bluetooth:bluetooth",
+    ]
+}
+```
+
+蓝牙模块目录下的 `BUILD.gn`：
+
+```gn
+static_library("bluetooth") {
+    sources = [
+        "bluetooth.c",
+    ]
+
+    include_dirs = [
+        "//utils/native/lite/include",
+        "//kernel/liteos_m/components/cmsis/2.0",
+        "//base/iot_hardware/interfaces/kits/wifiiot_lite",
+    ]
+}
+```
+
+编译日志中应当出现：
+
+```text
+-lbluetooth
+```
+
+而不应该再出现旧工程的：
+
+```text
+-lsum
+```
+
+## 蓝牙接收验证
+
+烧录蓝牙程序后，手机发送指令，串口能看到：
+
+```text
+UART recv: W
+UART recv: O
+```
+
+说明：
+
+```text
+手机 -> 蓝牙模块 -> Hi3861 UART1
+```
+
+这条链路是通的。
+
+但是此时小车不动，因为程序还只是 UART 回显，没有把手机命令转发给 STM32。
+
+## Hi3861 与 STM32 的通信方式
+
+原来的小车控制方案中，Hi3861 不是直接控制电机，而是通过 UART 给 STM32 发送电机控制帧。
+
+电机控制帧格式：
+
+```text
+0xFC  左轮方向  左轮速度  右轮方向  右轮速度  0xFD
+```
+
+方向定义：
+
+```text
+0：正转
+1：反转
+```
+
+例如前进：
+
+```text
+FC 00 96 00 96 FD
+```
+
+例如停止：
+
+```text
+FC 00 00 00 00 FD
+```
+
+## UART1 和 UART2 冲突问题
+
+原计划是：
+
+```text
+UART1：连接蓝牙模块
+UART2：连接 STM32
+```
+
+但是实际测试发现，Hi3861 的 SDK 中 `UartInit()` 不能稳定同时初始化 UART1 和 UART2。
+
+先初始化 UART1，再初始化 UART2，会出现：
+
+```text
+Failed to init motor UART2, err code: 4294967295
+```
+
+先初始化 UART2，再初始化 UART1，会出现：
+
+```text
+Failed to init UART1, err code: 4294967295
+```
+
+`4294967295` 实际就是 `-1`，表示初始化失败。
+
+因此不能直接使用两个硬件 UART 完成转发。
+
+## 最终采用的方案
+
+最终保留 UART1 给蓝牙模块使用，Hi3861 通过 GPIO11 软件模拟 UART TX，将控制帧发送给 STM32。
+
+最终链路：
+
+```text
+手机 LightBlue
+  -> 蓝牙模块
+  -> Hi3861 UART1(GPIO0/GPIO1)
+  -> Hi3861 GPIO11 软件串口
+  -> STM32 USART1
+  -> STM32 PWM 控制电机
+```
+
+## Hi3861 端实现
+
+蓝牙模块连接 Hi3861 UART1：
+
+```text
+GPIO0：UART1_TX
+GPIO1：UART1_RX
+波特率：9600
+```
+
+初始化 UART1：
+
+```c
+IoSetFunc(WIFI_IOT_IO_NAME_GPIO_0, WIFI_IOT_IO_FUNC_GPIO_0_UART1_TXD);
+IoSetFunc(WIFI_IOT_IO_NAME_GPIO_1, WIFI_IOT_IO_FUNC_GPIO_1_UART1_RXD);
+UartInit(WIFI_IOT_UART_IDX_1, &uartAttr, NULL);
+```
+
+GPIO11 用作软件串口 TX：
+
+```c
+IoSetFunc(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_IO_FUNC_GPIO_11_GPIO);
+GpioSetDir(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_GPIO_DIR_OUT);
+GpioSetOutputVal(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_GPIO_VALUE1);
+```
+
+软件串口波特率为 9600：
+
+```c
+#define SOFT_UART_BIT_US 104
+```
+
+因为：
+
+```text
+1 / 9600 ≈ 104us
+```
+
+发送一个字节时：
+
+```text
+起始位：GPIO11 拉低
+数据位：低位先发，共 8 位
+停止位：GPIO11 拉高
+```
+
+## Hi3861 命令解析
+
+Hi3861 收到手机发送的字符后，根据指令调用不同动作：
+
+```text
+O -> 停止
+W -> 前进
+A -> 左转
+D -> 右转
+S -> 后退
+I -> 低速前进
+K -> 高速前进
+```
+
+换行符会被忽略：
+
+```c
+case '\r':
+case '\n':
+    return;
+```
+
+## 小车动作参数
+
+最终使用的速度参数：
+
+```text
+O：  0,    0
+W：150,  150
+A：-50,  150
+D：150,  -50
+S：-150, -150
+I：100,  100
+K：150,  150
+```
+
+其中左右两个数分别代表左轮速度和右轮速度。负数表示反转。
+
+## 稳定性优化
+
+由于 GPIO 软件串口对时序要求较高，为了提升可靠性，做了几项优化。
+
+蓝牙读取间隔从 200ms 降到 10ms：
+
+```c
+#define UART_READ_IDLE_US (10 * 1000)
+```
+
+发送软件串口帧时锁住调度，避免发送过程中被任务切走：
+
+```c
+osKernelLock();
+发送数据帧
+osKernelRestoreLock();
+```
+
+普通运动命令重复发送 3 次：
+
+```c
+#define MOTOR_FRAME_REPEAT 3
+```
+
+停止命令重复发送 8 次：
+
+```c
+#define MOTOR_STOP_FRAME_REPEAT 8
+```
+
+这样即使某一帧没被 STM32 正确接收，后面的重复帧也能提高成功率。停止命令重复次数更多，是为了让小车能尽快停下来。
+
+## STM32 端实现
+
+STM32 负责真正控制电机。
+
+STM32 USART1 接收 Hi3861 发来的数据：
+
+```text
+PA9：USART1_TX
+PA10：USART1_RX
+波特率：9600
+```
+
+初始化：
+
+```c
+uart_init(9600);
+```
+
+STM32 接收到完整 6 字节帧后解析：
+
+```c
+0xFC  left_dir  left_speed  right_dir  right_speed  0xFD
+```
+
+如果方向位不为 0，则对应电机速度取负：
+
+```c
+if (motor_frame[1] != 0) {
+    left_speed = -left_speed;
+}
+
+if (motor_frame[3] != 0) {
+    right_speed = -right_speed;
+}
+```
+
+最后输出 PWM：
+
+```c
+Set_Pwm(left_speed * 20, right_speed * 20);
+```
+
+这里乘以 20，是因为手机和 Hi3861 传递的是 `0~150` 的速度值，而 STM32 的 PWM 范围更大，需要放大后才能让电机正常转动。
+
+## STM32 单字符协议
+
+STM32 端也支持直接接收手机协议字符：
+
+```text
+O：停止
+W：前进
+A：左转
+D：右转
+S：后退
+I：低速前进
+K：高速前进
+```
+
+对应函数：
+
+```c
+O -> car_stop()
+W -> car_forward()
+A -> car_left()
+D -> car_right()
+S -> car_backward()
+I -> stm32motor_control(100, 100)
+K -> stm32motor_control(150, 150)
+```
+
+后来发现 STM32 单字符控制路径和帧控制路径速度单位不一致。帧控制会执行：
+
+```c
+Set_Pwm(left_speed * 20, right_speed * 20);
+```
+
+而单字符路径一开始没有乘 20，导致 `W/I/K` 正向速度太小，电机不明显运动。
+
+最终修正为：
+
+```c
+void stm32motor_control(int left_motor, int right_motor)
+{
+    Set_Pwm(left_motor * 20, right_motor * 20);
+}
+```
+
+## 调试过程记录
+
+一开始 LightBlue 能发送命令，串口能打印：
+
+```text
+UART recv: W
+UART recv: O
+```
+
+但小车不动。原因是 Hi3861 没有转发命令给 STM32。
+
+后来加入 UART2 转发后，出现：
+
+```text
+Failed to init motor UART2
+```
+
+说明 UART2 初始化失败。
+
+调整初始化顺序后，又出现：
+
+```text
+Failed to init UART1
+```
+
+说明 UART1 和 UART2 不能同时使用。
+
+于是改为 GPIO11 软件串口。
+
+之后出现：
+
+```text
+A、D、O 有反应
+W、S、I、K 不稳定或无反应
+```
+
+原因包括：
+
+```text
+软件串口时序不稳定
+STM32 速度缩放不一致
+前进速度参数偏小
+```
+
+最终通过以下方式改善：
+
+```text
+软件串口发送时锁调度
+命令重复发送
+停止命令重复更多次
+STM32 速度统一乘 20
+前进速度提高到 150
+```
+
+## 最终效果
+
+启动后串口应打印：
+
+```text
+Bluetooth car control start.
+```
+
+手机发送指令后应打印：
+
+```text
+UART recv: W
+Bluetooth command: W
+```
+
+小车可以通过手机控制：
+
+```text
+W：前进
+A：左转
+D：右转
+S：后退
+O：停止
+I：低速前进
+K：高速前进
+```
+
+## 注意事项
+
+Hi3861 和 STM32 必须共地。
+
+Hi3861 GPIO11 要接到 STM32 的串口 RX。
+
+STM32 串口波特率必须和 Hi3861 软件串口一致，目前为 9600。
+
+手机端发送普通 ASCII 字符即可，不需要发送十六进制。
+
+如果 LightBlue 自动附带 `\r` 或 `\n`，程序会忽略换行，不影响控制。
+
+如果后续要进一步提高可靠性，可以考虑：
+
+```text
+使用 I2C 替代软件 UART
+尝试 Hi3861 底层 hi_uart 同时打开 UART1 和 UART2
+让蓝牙模块直接连接 STM32
+```
+
+当前方案是在不改变“手机连接 Hi3861，再控制 STM32”这个结构的前提下，实现的可用版本。
+
