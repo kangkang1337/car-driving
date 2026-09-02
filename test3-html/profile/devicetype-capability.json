@@ -1,0 +1,91 @@
+{
+  "devices": [
+    {
+      "manufacturer_name": null,
+      "manufacturer_id": "10.0SUM",
+      "model": "smart_car",
+      "protocol_type": "MQTT",
+      "device_type": "smart_car",
+      "service_capabilities": [
+        {
+          "service_id": "qstcar",
+          "service_type": "qstcar",
+          "option": "Optional",
+          "description": "Smart car realtime data",
+          "properties": [
+            {
+              "property_name": "temp",
+              "data_type": "int",
+              "required": false
+            },
+            {
+              "property_name": "humi",
+              "data_type": "int",
+              "required": false
+            },
+            {
+              "property_name": "lumi",
+              "data_type": "int",
+              "required": false
+            },
+            {
+              "property_name": "mode_led",
+              "data_type": "string",
+              "required": false
+            },
+            {
+              "property_name": "car_mode",
+              "data_type": "string",
+              "required": false
+            },
+            {
+              "property_name": "temperature",
+              "data_type": "decimal",
+              "required": false
+            },
+            {
+              "property_name": "humidity",
+              "data_type": "decimal",
+              "required": false
+            },
+            {
+              "property_name": "ap_ir",
+              "data_type": "int",
+              "required": false
+            },
+            {
+              "property_name": "ap_als",
+              "data_type": "int",
+              "required": false
+            },
+            {
+              "property_name": "ap_ps",
+              "data_type": "int",
+              "required": false
+            },
+            {
+              "property_name": "edge_left",
+              "data_type": "int",
+              "required": false
+            },
+            {
+              "property_name": "edge_right",
+              "data_type": "int",
+              "required": false
+            },
+            {
+              "property_name": "distance_cm",
+              "data_type": "decimal",
+              "required": false
+            },
+            {
+              "property_name": "led_on",
+              "data_type": "int",
+              "required": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
