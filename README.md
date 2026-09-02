@@ -549,3 +549,120 @@ The dashboard reads service `qstcar` and plots these fields:
 ```text
 temperature, humidity, ap_ir, ap_als, ap_ps, distance_cm, edge_left, edge_right, led_on
 ```
+
+
+## Bluetooth Car Control Through Hi3861 and STM32
+
+This project uses a mobile Bluetooth debugging app to control a smart car. The phone connects to a Bluetooth module, the Bluetooth module sends commands to the Hi3861 board through UART1, and the Hi3861 forwards motor commands to the STM32 controller.
+
+## Control Flow
+
+```text
+Mobile phone
+  -> Bluetooth module
+  -> Hi3861 UART1
+  -> STM32 motor controller
+  -> Motors
+```
+
+## Mobile Command Protocol
+
+The mobile app sends single ASCII characters:
+
+```text
+O: Stop
+W: Move forward
+A: Turn left
+D: Turn right
+S: Move backward
+I: Low-speed forward
+K: High-speed forward
+```
+
+## Hi3861 Side
+
+The Hi3861 receives Bluetooth data from UART1.
+
+UART1 is used for the Bluetooth module:
+
+```text
+GPIO0: UART1_TX
+GPIO1: UART1_RX
+Baud rate: 9600
+```
+
+After receiving a command, the Hi3861 parses the character and sends the corresponding motor control data to the STM32.
+
+Because UART1 and UART2 cannot be used reliably at the same time in this SDK environment, GPIO11 is used as a software UART TX pin to send motor frames to the STM32.
+
+## STM32 Side
+
+The STM32 receives motor frames from the Hi3861 and controls the motors using PWM.
+
+The STM32 UART baud rate is set to:
+
+```text
+9600
+```
+
+The STM32 parses the received command frame and calls the corresponding motor function.
+
+## Motor Frame Format
+
+The Hi3861 sends a 6-byte frame to the STM32:
+
+```text
+0xFC  left_dir  left_speed  right_dir  right_speed  0xFD
+```
+
+Direction values:
+
+```text
+0: Forward
+1: Reverse
+```
+
+Example: forward at speed 150
+
+```text
+FC 00 96 00 96 FD
+```
+
+Example: stop
+
+```text
+FC 00 00 00 00 FD
+```
+
+## Command Mapping
+
+```text
+O -> stop:      0, 0
+W -> forward:   150, 150
+A -> left:      -50, 150
+D -> right:     150, -50
+S -> backward: -150, -150
+I -> forward:   100, 100
+K -> forward:   150, 150
+```
+
+## Reliability Improvements
+
+To improve stability, the Hi3861 sends each motor frame multiple times.
+
+```text
+Normal commands: repeated 3 times
+Stop command: repeated 8 times
+```
+
+The stop command is repeated more times so the car can stop as quickly and reliably as possible.
+
+The Bluetooth receive interval is reduced to 10 ms to improve response speed.
+
+## Notes
+
+- The phone should send plain ASCII characters without extra formatting.
+- LightBlue on iOS can be used if the Bluetooth module is a BLE module.
+- The Bluetooth module must be connected to Hi3861 UART1.
+- The STM32 must use the matching UART baud rate.
+- Hi3861 and STM32 must share GND.
