@@ -649,3 +649,212 @@ Obstacle avoidance timing:
 Both Hi3861 and STM32 firmware must be rebuilt and burned.
 
 The current local machine did not have the required Hi3861 or STM32 compiler tools available, so the code was updated and statically checked, but firmware binaries were not rebuilt here.
+
+
+
+# 9.2
+
+## Purpose
+
+The Hi3861 acts as the bridge between the mobile phone and the STM32 motor controller.
+
+It receives Bluetooth commands from the phone and forwards motor control data to the STM32.
+
+## Control Flow
+
+```text
+Mobile phone
+  -> Bluetooth module
+  -> Hi3861 UART1
+  -> Hi3861 GPIO11 software UART
+  -> STM32 USART1
+  -> Motors
+```
+
+## Bluetooth UART
+
+The Bluetooth module is connected to Hi3861 UART1.
+
+```text
+GPIO0: UART1_TX
+GPIO1: UART1_RX
+Baud rate: 9600
+```
+
+UART1 is initialized with:
+
+```c
+UartInit(WIFI_IOT_UART_IDX_1, &uartAttr, NULL);
+```
+
+The Hi3861 reads Bluetooth data using:
+
+```c
+UartRead(WIFI_IOT_UART_IDX_1, uartBuff, UART_BUFF_SIZE - 1);
+```
+
+## Mobile Command Protocol
+
+The phone sends single ASCII characters:
+
+```text
+O: Stop
+W: Move forward
+A: Turn left
+D: Turn right
+S: Move backward
+I: Low-speed forward
+K: High-speed forward
+```
+
+## Command Processing
+
+After the Hi3861 receives a command, it calls the matching control function:
+
+```c
+case 'O':
+    CarStop();
+    break;
+
+case 'W':
+    CarForward();
+    break;
+
+case 'A':
+    CarLeft();
+    break;
+
+case 'D':
+    CarRight();
+    break;
+
+case 'S':
+    CarBackward();
+    break;
+
+case 'I':
+    Stm32MotorControl(100, 100);
+    break;
+
+case 'K':
+    Stm32MotorControl(150, 150);
+    break;
+```
+
+Newline characters are ignored:
+
+```c
+case '\r':
+case '\n':
+    return;
+```
+
+## Forwarding to STM32
+
+The Hi3861 does not directly drive the motors. Instead, it sends a motor control frame to the STM32.
+
+Because UART1 is used by the Bluetooth module and UART2 cannot be initialized reliably at the same time in this SDK environment, GPIO11 is used as a software UART TX pin.
+
+```text
+GPIO11: software UART TX to STM32 RX
+Baud rate: 9600
+```
+
+## Software UART
+
+GPIO11 is configured as a normal output pin:
+
+```c
+IoSetFunc(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_IO_FUNC_GPIO_11_GPIO);
+GpioSetDir(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_GPIO_DIR_OUT);
+GpioSetOutputVal(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_GPIO_VALUE1);
+```
+
+One UART bit lasts about 104 microseconds:
+
+```c
+#define SOFT_UART_BIT_US 104
+```
+
+This matches a 9600 baud UART signal.
+
+## Motor Frame Format
+
+The Hi3861 sends a 6-byte frame to the STM32:
+
+```text
+0xFC  left_dir  left_speed  right_dir  right_speed  0xFD
+```
+
+Direction values:
+
+```text
+0: Forward
+1: Reverse
+```
+
+Example: stop
+
+```text
+FC 00 00 00 00 FD
+```
+
+Example: move forward at speed 150
+
+```text
+FC 00 96 00 96 FD
+```
+
+## Command Mapping
+
+```text
+O -> 0, 0
+W -> 150, 150
+A -> -50, 150
+D -> 150, -50
+S -> -150, -150
+I -> 100, 100
+K -> 150, 150
+```
+
+## Reliability Improvements
+
+To improve reliability, each command frame is sent multiple times.
+
+```text
+Normal commands: 3 times
+Stop command: 8 times
+```
+
+The stop command is repeated more times to make stopping more responsive.
+
+The Bluetooth read interval is reduced to:
+
+```c
+#define UART_READ_IDLE_US (10 * 1000)
+```
+
+This allows the Hi3861 to check for new Bluetooth commands every 10 ms.
+
+## Startup Log
+
+After successful initialization, the serial monitor should show:
+
+```text
+Bluetooth car control start.
+```
+
+When a command is received, it should show:
+
+```text
+UART recv: W
+Bluetooth command: W
+```
+
+## Notes
+
+- The mobile app should send plain ASCII characters.
+- `\r` and `\n` are ignored.
+- Hi3861 and STM32 must share GND.
+- The STM32 UART baud rate must also be 9600.
+- GPIO11 from Hi3861 should be connected to the STM32 UART RX pin.
