@@ -2295,3 +2295,500 @@ osDelay tick 问题修正
 #define OBSTACLE_TURN_TIME_MS 500
 #define MAX_OBSTACLE_TURN_TIME_MS 1500
 ```
+
+
+# 9.2
+
+## 项目目标
+
+使用手机蓝牙调试工具控制小车运动。手机通过蓝牙模块连接 Hi3861，Hi3861 接收控制指令后，再控制 STM32，最终由 STM32 驱动小车电机。
+
+整体控制链路：
+
+```text
+手机 LightBlue
+  -> 蓝牙模块
+  -> Hi3861
+  -> STM32
+  -> 电机
+```
+
+## 手机端控制协议
+
+手机端发送单个 ASCII 字符控制小车：
+
+```text
+O：停止
+W：前进
+A：左转
+D：右转
+S：后退
+I：低速前进
+K：高速前进
+```
+
+## 最初遇到的问题
+
+一开始烧录后，串口打印的是之前综合实验的日志：
+
+```text
+10.0SUM project start.
+Task 1 running: car safety...
+Task 2 running: OLED...
+Task 3 running: WiFi connect
+Task 4 running: Huawei Cloud MQTT...
+```
+
+说明板子里运行的不是蓝牙控制程序，而是之前的 `10.0SUM` 程序。
+
+原因是 `BUILD.gn` 没有保存，构建时仍然链接了旧模块。
+
+修正后，构建配置中启用：
+
+```gn
+"11.0_bluetooth:bluetooth"
+```
+
+重新编译烧录后，启动日志变为：
+
+```text
+UART1 example start.
+```
+
+说明已经烧录到蓝牙 UART 示例程序。
+
+## BUILD.gn 配置
+
+应用层 `BUILD.gn` 中只保留蓝牙工程：
+
+```gn
+lite_component("app") {
+    features = [
+        "11.0_bluetooth:bluetooth",
+    ]
+}
+```
+
+蓝牙模块目录下的 `BUILD.gn`：
+
+```gn
+static_library("bluetooth") {
+    sources = [
+        "bluetooth.c",
+    ]
+
+    include_dirs = [
+        "//utils/native/lite/include",
+        "//kernel/liteos_m/components/cmsis/2.0",
+        "//base/iot_hardware/interfaces/kits/wifiiot_lite",
+    ]
+}
+```
+
+编译日志中应当出现：
+
+```text
+-lbluetooth
+```
+
+而不应该再出现旧工程的：
+
+```text
+-lsum
+```
+
+## 蓝牙接收验证
+
+烧录蓝牙程序后，手机发送指令，串口能看到：
+
+```text
+UART recv: W
+UART recv: O
+```
+
+说明：
+
+```text
+手机 -> 蓝牙模块 -> Hi3861 UART1
+```
+
+这条链路是通的。
+
+但是此时小车不动，因为程序还只是 UART 回显，没有把手机命令转发给 STM32。
+
+## Hi3861 与 STM32 的通信方式
+
+原来的小车控制方案中，Hi3861 不是直接控制电机，而是通过 UART 给 STM32 发送电机控制帧。
+
+电机控制帧格式：
+
+```text
+0xFC  左轮方向  左轮速度  右轮方向  右轮速度  0xFD
+```
+
+方向定义：
+
+```text
+0：正转
+1：反转
+```
+
+例如前进：
+
+```text
+FC 00 96 00 96 FD
+```
+
+例如停止：
+
+```text
+FC 00 00 00 00 FD
+```
+
+## UART1 和 UART2 冲突问题
+
+原计划是：
+
+```text
+UART1：连接蓝牙模块
+UART2：连接 STM32
+```
+
+但是实际测试发现，Hi3861 的 SDK 中 `UartInit()` 不能稳定同时初始化 UART1 和 UART2。
+
+先初始化 UART1，再初始化 UART2，会出现：
+
+```text
+Failed to init motor UART2, err code: 4294967295
+```
+
+先初始化 UART2，再初始化 UART1，会出现：
+
+```text
+Failed to init UART1, err code: 4294967295
+```
+
+`4294967295` 实际就是 `-1`，表示初始化失败。
+
+因此不能直接使用两个硬件 UART 完成转发。
+
+## 最终采用的方案
+
+最终保留 UART1 给蓝牙模块使用，Hi3861 通过 GPIO11 软件模拟 UART TX，将控制帧发送给 STM32。
+
+最终链路：
+
+```text
+手机 LightBlue
+  -> 蓝牙模块
+  -> Hi3861 UART1(GPIO0/GPIO1)
+  -> Hi3861 GPIO11 软件串口
+  -> STM32 USART1
+  -> STM32 PWM 控制电机
+```
+
+## Hi3861 端实现
+
+蓝牙模块连接 Hi3861 UART1：
+
+```text
+GPIO0：UART1_TX
+GPIO1：UART1_RX
+波特率：9600
+```
+
+初始化 UART1：
+
+```c
+IoSetFunc(WIFI_IOT_IO_NAME_GPIO_0, WIFI_IOT_IO_FUNC_GPIO_0_UART1_TXD);
+IoSetFunc(WIFI_IOT_IO_NAME_GPIO_1, WIFI_IOT_IO_FUNC_GPIO_1_UART1_RXD);
+UartInit(WIFI_IOT_UART_IDX_1, &uartAttr, NULL);
+```
+
+GPIO11 用作软件串口 TX：
+
+```c
+IoSetFunc(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_IO_FUNC_GPIO_11_GPIO);
+GpioSetDir(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_GPIO_DIR_OUT);
+GpioSetOutputVal(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_GPIO_VALUE1);
+```
+
+软件串口波特率为 9600：
+
+```c
+#define SOFT_UART_BIT_US 104
+```
+
+因为：
+
+```text
+1 / 9600 ≈ 104us
+```
+
+发送一个字节时：
+
+```text
+起始位：GPIO11 拉低
+数据位：低位先发，共 8 位
+停止位：GPIO11 拉高
+```
+
+## Hi3861 命令解析
+
+Hi3861 收到手机发送的字符后，根据指令调用不同动作：
+
+```text
+O -> 停止
+W -> 前进
+A -> 左转
+D -> 右转
+S -> 后退
+I -> 低速前进
+K -> 高速前进
+```
+
+换行符会被忽略：
+
+```c
+case '\r':
+case '\n':
+    return;
+```
+
+## 小车动作参数
+
+最终使用的速度参数：
+
+```text
+O：  0,    0
+W：150,  150
+A：-50,  150
+D：150,  -50
+S：-150, -150
+I：100,  100
+K：150,  150
+```
+
+其中左右两个数分别代表左轮速度和右轮速度。负数表示反转。
+
+## 稳定性优化
+
+由于 GPIO 软件串口对时序要求较高，为了提升可靠性，做了几项优化。
+
+蓝牙读取间隔从 200ms 降到 10ms：
+
+```c
+#define UART_READ_IDLE_US (10 * 1000)
+```
+
+发送软件串口帧时锁住调度，避免发送过程中被任务切走：
+
+```c
+osKernelLock();
+发送数据帧
+osKernelRestoreLock();
+```
+
+普通运动命令重复发送 3 次：
+
+```c
+#define MOTOR_FRAME_REPEAT 3
+```
+
+停止命令重复发送 8 次：
+
+```c
+#define MOTOR_STOP_FRAME_REPEAT 8
+```
+
+这样即使某一帧没被 STM32 正确接收，后面的重复帧也能提高成功率。停止命令重复次数更多，是为了让小车能尽快停下来。
+
+## STM32 端实现
+
+STM32 负责真正控制电机。
+
+STM32 USART1 接收 Hi3861 发来的数据：
+
+```text
+PA9：USART1_TX
+PA10：USART1_RX
+波特率：9600
+```
+
+初始化：
+
+```c
+uart_init(9600);
+```
+
+STM32 接收到完整 6 字节帧后解析：
+
+```c
+0xFC  left_dir  left_speed  right_dir  right_speed  0xFD
+```
+
+如果方向位不为 0，则对应电机速度取负：
+
+```c
+if (motor_frame[1] != 0) {
+    left_speed = -left_speed;
+}
+
+if (motor_frame[3] != 0) {
+    right_speed = -right_speed;
+}
+```
+
+最后输出 PWM：
+
+```c
+Set_Pwm(left_speed * 20, right_speed * 20);
+```
+
+这里乘以 20，是因为手机和 Hi3861 传递的是 `0~150` 的速度值，而 STM32 的 PWM 范围更大，需要放大后才能让电机正常转动。
+
+## STM32 单字符协议
+
+STM32 端也支持直接接收手机协议字符：
+
+```text
+O：停止
+W：前进
+A：左转
+D：右转
+S：后退
+I：低速前进
+K：高速前进
+```
+
+对应函数：
+
+```c
+O -> car_stop()
+W -> car_forward()
+A -> car_left()
+D -> car_right()
+S -> car_backward()
+I -> stm32motor_control(100, 100)
+K -> stm32motor_control(150, 150)
+```
+
+后来发现 STM32 单字符控制路径和帧控制路径速度单位不一致。帧控制会执行：
+
+```c
+Set_Pwm(left_speed * 20, right_speed * 20);
+```
+
+而单字符路径一开始没有乘 20，导致 `W/I/K` 正向速度太小，电机不明显运动。
+
+最终修正为：
+
+```c
+void stm32motor_control(int left_motor, int right_motor)
+{
+    Set_Pwm(left_motor * 20, right_motor * 20);
+}
+```
+
+## 调试过程记录
+
+一开始 LightBlue 能发送命令，串口能打印：
+
+```text
+UART recv: W
+UART recv: O
+```
+
+但小车不动。原因是 Hi3861 没有转发命令给 STM32。
+
+后来加入 UART2 转发后，出现：
+
+```text
+Failed to init motor UART2
+```
+
+说明 UART2 初始化失败。
+
+调整初始化顺序后，又出现：
+
+```text
+Failed to init UART1
+```
+
+说明 UART1 和 UART2 不能同时使用。
+
+于是改为 GPIO11 软件串口。
+
+之后出现：
+
+```text
+A、D、O 有反应
+W、S、I、K 不稳定或无反应
+```
+
+原因包括：
+
+```text
+软件串口时序不稳定
+STM32 速度缩放不一致
+前进速度参数偏小
+```
+
+最终通过以下方式改善：
+
+```text
+软件串口发送时锁调度
+命令重复发送
+停止命令重复更多次
+STM32 速度统一乘 20
+前进速度提高到 150
+```
+
+## 最终效果
+
+启动后串口应打印：
+
+```text
+Bluetooth car control start.
+```
+
+手机发送指令后应打印：
+
+```text
+UART recv: W
+Bluetooth command: W
+```
+
+小车可以通过手机控制：
+
+```text
+W：前进
+A：左转
+D：右转
+S：后退
+O：停止
+I：低速前进
+K：高速前进
+```
+
+## 注意事项
+
+Hi3861 和 STM32 必须共地。
+
+Hi3861 GPIO11 要接到 STM32 的串口 RX。
+
+STM32 串口波特率必须和 Hi3861 软件串口一致，目前为 9600。
+
+手机端发送普通 ASCII 字符即可，不需要发送十六进制。
+
+如果 LightBlue 自动附带 `\r` 或 `\n`，程序会忽略换行，不影响控制。
+
+如果后续要进一步提高可靠性，可以考虑：
+
+```text
+使用 I2C 替代软件 UART
+尝试 Hi3861 底层 hi_uart 同时打开 UART1 和 UART2
+让蓝牙模块直接连接 STM32
+```
+
+当前方案是在不改变“手机连接 Hi3861，再控制 STM32”这个结构的前提下，实现的可用版本。
