@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Car Realtime Data</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --line: #d9e0e7;
+      --text: #17202a;
+      --muted: #657384;
+      --blue: #2563eb;
+      --green: #15803d;
+      --orange: #c2410c;
+      --red: #dc2626;
+      --cyan: #0891b2;
+      --violet: #7c3aed;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    button, input {
+      font: inherit;
+    }
+
+    .app {
+      min-height: 100vh;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 68px;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .title {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 68vw;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      border-radius: 8px;
+      color: var(--muted);
+      white-space: nowrap;
+      font-size: 13px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--red);
+    }
+
+    .dot.live {
+      background: var(--green);
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 18px;
+      padding: 18px;
+    }
+
+    .side, .main {
+      min-width: 0;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .metric-list {
+      display: grid;
+      gap: 1px;
+      background: var(--line);
+    }
+
+    .metric {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      padding: 11px 14px;
+      background: #fff;
+      align-items: center;
+    }
+
+    .metric span:first-child {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .metric strong {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .controls {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+    }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .control-row input {
+      width: 78px;
+      padding: 7px 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      text-align: right;
+    }
+
+    .button-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      border-radius: 6px;
+      padding: 8px 10px;
+      cursor: pointer;
+      color: var(--text);
+    }
+
+    .btn.primary {
+      border-color: var(--blue);
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .chart-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .chart-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .chart-head h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .legend {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      background: currentColor;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 240px;
+    }
+
+    .raw {
+      margin-top: 18px;
+    }
+
+    pre {
+      margin: 0;
+      padding: 14px;
+      max-height: 240px;
+      overflow: auto;
+      background: #101827;
+      color: #dbeafe;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 920px) {
+      .content {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .subtitle {
+        white-space: normal;
+        max-width: none;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .status {
+        width: 100%;
+        justify-content: space-between;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="app">
+    <header class="topbar">
+      <div class="title">
+        <h1>Smart Car Realtime Data</h1>
+        <div class="subtitle">{{ deviceId || 'waiting for device data' }}</div>
+      </div>
+      <div class="status">
+        <span class="dot" :class="{ live: connected && !mock }"></span>
+        <span>{{ statusText }}</span>
+      </div>
+    </header>
+
+    <main class="content">
+      <aside class="side">
+        <section class="panel">
+          <div class="section-title">
+            <span>Latest Values</span>
+            <span>{{ lastTimeText }}</span>
+          </div>
+          <div class="metric-list">
+            <div class="metric" v-for="metric in metrics" :key="metric.key">
+              <span>{{ metric.label }}</span>
+              <strong>{{ formatValue(latest[metric.key], metric.unit) }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel raw">
+          <div class="section-title">Polling</div>
+          <div class="controls">
+            <label class="control-row">
+              <span>Interval ms</span>
+              <input type="number" min="1000" step="500" v-model.number="pollInterval">
+            </label>
+            <label class="control-row">
+              <span>Points kept</span>
+              <input type="number" min="30" max="600" step="10" v-model.number="maxPoints">
+            </label>
+            <div class="button-row">
+              <button class="btn primary" @click="startPolling">Start</button>
+              <button class="btn" @click="stopPolling">Stop</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="main">
+        <div class="chart-grid">
+          <chart-card title="Temperature / Humidity" :series="chartSeries.env" :history="history"></chart-card>
+          <chart-card title="AP3216C Light / IR / PS" :series="chartSeries.ap" :history="history"></chart-card>
+          <chart-card title="Ultrasonic Distance" :series="chartSeries.distance" :history="history"></chart-card>
+          <chart-card title="Edge Sensor / LED" :series="chartSeries.state" :history="history"></chart-card>
+        </div>
+
+        <section class="panel raw">
+          <div class="section-title">Raw Snapshot</div>
+          <pre>{{ prettyLatest }}</pre>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const { createApp, defineComponent, nextTick } = Vue;
+    const API_BASE = location.protocol === 'file:' || location.port !== '8080' ? 'http://localhost:8080' : '';
+
+    const ChartCard = defineComponent({
+      name: 'ChartCard',
+      props: {
+        title: { type: String, required: true },
+        series: { type: Array, required: true },
+        history: { type: Array, required: true }
+      },
+      template: `
+        <article class="chart-card">
+          <div class="chart-head">
+            <h2>{{ title }}</h2>
+            <div class="legend">
+              <span class="legend-item" v-for="item in series" :key="item.key" :style="{ color: item.color }">
+                <span class="swatch"></span>{{ item.label }}
+              </span>
+            </div>
+          </div>
+          <canvas ref="canvas"></canvas>
+        </article>
+      `,
+      mounted() {
+        this.resizeObserver = new ResizeObserver(() => this.draw());
+        this.resizeObserver.observe(this.$refs.canvas);
+        this.draw();
+      },
+      beforeUnmount() {
+        if (this.resizeObserver) {
+          this.resizeObserver.disconnect();
+        }
+      },
+      watch: {
+        history: {
+          deep: true,
+          handler() {
+            nextTick(() => this.draw());
+          }
+        }
+      },
+      methods: {
+        draw() {
+          const canvas = this.$refs.canvas;
+          const rect = canvas.getBoundingClientRect();
+          const ratio = window.devicePixelRatio || 1;
+          canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+          canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+          const ctx = canvas.getContext('2d');
+          ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+          const width = rect.width;
+          const height = rect.height;
+          const pad = { left: 44, right: 14, top: 18, bottom: 28 };
+          const plotW = Math.max(1, width - pad.left - pad.right);
+          const plotH = Math.max(1, height - pad.top - pad.bottom);
+          ctx.clearRect(0, 0, width, height);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+
+          const values = [];
+          for (const item of this.series) {
+            for (const point of this.history) {
+              const value = Number(point[item.key]);
+              if (Number.isFinite(value)) {
+                values.push(value);
+              }
+            }
+          }
+
+          const minRaw = values.length ? Math.min(...values) : 0;
+          const maxRaw = values.length ? Math.max(...values) : 1;
+          const span = Math.max(1, maxRaw - minRaw);
+          const min = minRaw - span * 0.12;
+          const max = maxRaw + span * 0.12;
+
+          ctx.strokeStyle = '#e5eaf0';
+          ctx.lineWidth = 1;
+          ctx.fillStyle = '#657384';
+          ctx.font = '12px Segoe UI, Arial, sans-serif';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'middle';
+
+          for (let i = 0; i <= 4; i++) {
+            const y = pad.top + (plotH * i / 4);
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(width - pad.right, y);
+            ctx.stroke();
+            const label = max - ((max - min) * i / 4);
+            ctx.fillText(this.formatAxis(label), pad.left - 8, y);
+          }
+
+          ctx.strokeStyle = '#cbd5df';
+          ctx.beginPath();
+          ctx.moveTo(pad.left, pad.top);
+          ctx.lineTo(pad.left, pad.top + plotH);
+          ctx.lineTo(width - pad.right, pad.top + plotH);
+          ctx.stroke();
+
+          if (this.history.length < 2) {
+            ctx.fillStyle = '#657384';
+            ctx.textAlign = 'center';
+            ctx.fillText('Waiting for realtime data', width / 2, height / 2);
+            return;
+          }
+
+          for (const item of this.series) {
+            ctx.strokeStyle = item.color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            let hasPoint = false;
+            this.history.forEach((point, index) => {
+              const value = Number(point[item.key]);
+              if (!Number.isFinite(value)) {
+                return;
+              }
+              const x = pad.left + (plotW * index / Math.max(1, this.history.length - 1));
+              const y = pad.top + plotH - ((value - min) / (max - min) * plotH);
+              if (!hasPoint) {
+                ctx.moveTo(x, y);
+                hasPoint = true;
+              } else {
+                ctx.lineTo(x, y);
+              }
+            });
+            ctx.stroke();
+          }
+
+          const first = this.history[0]?.timeLabel || '';
+          const last = this.history[this.history.length - 1]?.timeLabel || '';
+          ctx.fillStyle = '#657384';
+          ctx.textBaseline = 'top';
+          ctx.textAlign = 'left';
+          ctx.fillText(first, pad.left, height - 22);
+          ctx.textAlign = 'right';
+          ctx.fillText(last, width - pad.right, height - 22);
+        },
+        formatAxis(value) {
+          if (Math.abs(value) >= 100) {
+            return String(Math.round(value));
+          }
+          return value.toFixed(1);
+        }
+      }
+    });
+
+    createApp({
+      components: { ChartCard },
+      data() {
+        return {
+          latest: {},
+          config: {},
+          history: [],
+          connected: false,
+          mock: true,
+          loading: false,
+          error: '',
+          duplicateCloudCount: 0,
+          timer: null,
+          pollInterval: 2000,
+          maxPoints: 120,
+          metrics: [
+            { key: 'eventTimeLabel', label: 'Cloud Event', unit: '' },
+            { key: 'cloud_event_age_seconds', label: 'Cloud Age', unit: 's' },
+            { key: 'amqp_message_count', label: 'AMQP Count', unit: '' },
+            { key: 'amqp_message_delta_seconds', label: 'AMQP Delta', unit: 's' },
+            { key: 'temperature', label: 'Temperature', unit: 'C' },
+            { key: 'humidity', label: 'Humidity', unit: '%' },
+            { key: 'ap_ir', label: 'AP IR', unit: '' },
+            { key: 'ap_als', label: 'AP ALS', unit: '' },
+            { key: 'ap_ps', label: 'AP PS', unit: '' },
+            { key: 'distance_cm', label: 'Distance', unit: 'cm' },
+            { key: 'edge_left', label: 'Left Edge', unit: '' },
+            { key: 'edge_right', label: 'Right Edge', unit: '' },
+            { key: 'led_on', label: 'LED', unit: '' }
+          ],
+          chartSeries: {
+            env: [
+              { key: 'temperature', label: 'Temp', color: '#2563eb' },
+              { key: 'humidity', label: 'Humi', color: '#15803d' }
+            ],
+            ap: [
+              { key: 'ap_ir', label: 'IR', color: '#7c3aed' },
+              { key: 'ap_als', label: 'ALS', color: '#c2410c' },
+              { key: 'ap_ps', label: 'PS', color: '#0891b2' }
+            ],
+            distance: [
+              { key: 'distance_cm', label: 'cm', color: '#dc2626' }
+            ],
+            state: [
+              { key: 'edge_left', label: 'Left Edge', color: '#2563eb' },
+              { key: 'edge_right', label: 'Right Edge', color: '#c2410c' },
+              { key: 'led_on', label: 'LED', color: '#15803d' }
+            ]
+          }
+        };
+      },
+      computed: {
+        statusText() {
+          if (this.error) {
+            return this.error;
+          }
+          if (this.latest.error) {
+            return this.latest.error;
+          }
+          if (this.latest.stale) {
+            return 'Huawei Cloud stale';
+          }
+          if (!this.connected) {
+            return 'waiting';
+          }
+          if (!this.mock && this.latest.read_mode === 'shadow' && this.duplicateCloudCount >= 2) {
+            return 'Huawei Cloud live, waiting new upload';
+          }
+          return this.mock ? 'mock data' : 'Huawei Cloud live';
+        },
+        deviceId() {
+          return this.latest.device_id || this.config.device_id || '';
+        },
+        lastTimeText() {
+          return this.latest.timeLabel || '--:--:--';
+        },
+        prettyLatest() {
+          return JSON.stringify(this.latest, null, 2);
+        }
+      },
+      mounted() {
+        this.loadConfig();
+        this.loadHistory();
+        this.startPolling();
+      },
+      beforeUnmount() {
+        this.stopPolling();
+      },
+      methods: {
+        async loadConfig() {
+          try {
+            const response = await fetch(`${API_BASE}/api/config`, { cache: 'no-store' });
+            this.config = await response.json();
+          } catch (err) {
+            this.error = this.describeFetchError(err);
+          }
+        },
+        async loadHistory() {
+          try {
+            const response = await fetch(`${API_BASE}/api/history`, { cache: 'no-store' });
+            const data = await response.json();
+            this.history = data.map(this.normalizePoint).slice(-this.maxPoints);
+          } catch (err) {
+            this.error = this.describeFetchError(err);
+          }
+        },
+        async fetchLatest() {
+          if (this.loading) {
+            return;
+          }
+          this.loading = true;
+          try {
+            const response = await fetch(`${API_BASE}/api/latest`, { cache: 'no-store' });
+            const data = await response.json();
+            if (!response.ok) {
+              throw new Error(data.error || 'request failed');
+            }
+            const point = this.normalizePoint(data);
+            this.latest = point;
+            this.mock = Boolean(point.mock);
+            this.connected = true;
+            this.error = point.error || '';
+            const lastPoint = this.history[this.history.length - 1];
+            const sameCloudEvent = !point.mock && point.read_mode === 'shadow' &&
+              point.event_time && lastPoint?.event_time === point.event_time;
+            if (sameCloudEvent) {
+              this.duplicateCloudCount += 1;
+              this.history.splice(this.history.length - 1, 1, point);
+            } else {
+              this.duplicateCloudCount = 0;
+              this.history.push(point);
+            }
+            while (this.history.length > this.maxPoints) {
+              this.history.shift();
+            }
+          } catch (err) {
+            this.connected = false;
+            this.error = this.describeFetchError(err);
+          } finally {
+            this.loading = false;
+          }
+        },
+        startPolling() {
+          this.stopPolling();
+          this.fetchLatest();
+          this.timer = setInterval(() => this.fetchLatest(), Math.max(1000, this.pollInterval || 2000));
+        },
+        stopPolling() {
+          if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+          }
+        },
+        normalizePoint(raw) {
+          const point = { ...raw };
+          point.temperature = this.numberOr(point.temperature, point.temp);
+          point.humidity = this.numberOr(point.humidity, point.humi);
+          point.ap_als = this.numberOr(point.ap_als, point.lumi);
+          point.edge_left = this.numberOr(point.edge_left, 0);
+          point.edge_right = this.numberOr(point.edge_right, 0);
+          point.led_on = this.numberOr(point.led_on, 0);
+          point.distance_cm = this.numberOr(point.distance_cm, null);
+          const date = point.time ? new Date(point.time) : new Date();
+          point.time = Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+          point.timeLabel = new Date(point.time).toLocaleTimeString('zh-CN', { hour12: false });
+          point.eventTimeLabel = this.formatCloudEventTime(point.event_time) || point.timeLabel;
+          return point;
+        },
+        formatCloudEventTime(value) {
+          if (!value || typeof value !== 'string') {
+            return '';
+          }
+          const match = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+          if (!match) {
+            return value;
+          }
+          const date = new Date(Date.UTC(
+            Number(match[1]),
+            Number(match[2]) - 1,
+            Number(match[3]),
+            Number(match[4]),
+            Number(match[5]),
+            Number(match[6])
+          ));
+          return date.toLocaleTimeString('zh-CN', { hour12: false });
+        },
+        numberOr(value, fallback) {
+          const number = Number(value);
+          if (Number.isFinite(number)) {
+            return number;
+          }
+          const fallbackNumber = Number(fallback);
+          return Number.isFinite(fallbackNumber) ? fallbackNumber : fallback;
+        },
+        formatValue(value, unit) {
+          if (value === null || value === undefined || value === '') {
+            return '--';
+          }
+          if (typeof value === 'number') {
+            const text = Math.abs(value) >= 100 ? String(Math.round(value)) : value.toFixed(1);
+            return unit ? `${text} ${unit}` : text;
+          }
+          return unit ? `${value} ${unit}` : value;
+        },
+        describeFetchError(err) {
+          if (location.protocol === 'file:') {
+            return 'start Java server: http://localhost:8080/car.html';
+          }
+          return err && err.message ? `fetch failed: ${err.message}` : 'fetch failed';
+        }
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
