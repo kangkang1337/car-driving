@@ -1,311 +1,311 @@
 # 8.26
 
-## Hi3861 Hello World 与基础工程
+## Hi3861 Hello World and Basic Project Setup
 
-本阶段主要完成 Hi3861/OpenHarmony LiteOS-M 工程的基础验证，包括串口日志、双线程任务、编译配置和烧录流程。
+This stage focused on basic Hi3861/OpenHarmony LiteOS-M verification, including serial logs, dual-thread tasks, build configuration, and firmware flashing.
 
-关键点：
+Key points:
 
-- 在 `app/BUILD.gn` 中通过 `lite_component("app")` 的 `features` 选择当前要编译的实验模块。
-- 常见格式为 `"目录名:目标名"`，例如 `"1.0_Hello_World:hello_world"`。
-- 如果烧录后还是旧程序，优先检查 `BUILD.gn` 是否保存、目标是否切换成功、编译输出是否更新。
-- Hi3861 启动日志中出现 `ready to OS start`、`sdk ver`、`FileSystem mount ok`、`wifi init success` 属于系统正常启动信息。
+- The active demo is selected in `app/BUILD.gn` through the `features` list of `lite_component("app")`.
+- The usual format is `"folder_name:target_name"`, for example `"1.0_Hello_World:hello_world"`.
+- If the board still runs old firmware after flashing, first check whether `BUILD.gn` was saved, whether the selected target is correct, and whether the generated bin file is the latest one.
+- Startup logs such as `ready to OS start`, `sdk ver`, `FileSystem mount ok`, and `wifi init success` are normal Hi3861 system startup messages.
 
-## 双线程实验
+## Dual-Thread Demo
 
-实现了两个任务并行输出，用来验证 CMSIS-RTOS2 线程创建和调度：
+Two tasks were created to verify CMSIS-RTOS2 thread creation and scheduling:
 
-- Task 1 周期性输出一组日志。
-- Task 2 周期性输出另一组日志。
-- 通过 `osThreadNew()` 创建线程，通过 `osDelay()` 控制周期。
+- Task 1 prints one set of logs periodically.
+- Task 2 prints another set of logs periodically.
+- Threads are created with `osThreadNew()`, and periodic timing is controlled with `osDelay()`.
 
-注意：
+Notes:
 
-- Hi3861 工程里的 `osDelay()` 单位不一定等于 1ms，后续项目中确认实际 tick 约为 10ms。
-- 串口日志能看到任务交替输出，说明系统调度正常。
+- In this Hi3861 project, `osDelay()` is not necessarily measured in 1 ms units. Later testing showed that one OS tick is about 10 ms.
+- Alternating serial output from both tasks confirms that task scheduling is working.
 
-## SG90 舵机实验
+## SG90 Servo Demo
 
-完成 SG90 舵机的基础控制，用 PWM 输出控制角度。
+The SG90 servo was tested with PWM output.
 
-关键点：
+Key points:
 
-- SG90 使用 50Hz PWM，周期约 20ms。
-- 通过改变高电平脉宽控制角度，一般约 0.5ms 到 2.5ms 对应 0 到 180 度。
-- 后续超声波避障项目中，SG90 用来带动 HC-SR04 左右扫描。
+- SG90 uses 50 Hz PWM, with a period of about 20 ms.
+- The angle is controlled by changing the high-level pulse width. In general, about 0.5 ms to 2.5 ms maps to 0 to 180 degrees.
+- In the later ultrasonic obstacle avoidance project, the SG90 drives the HC-SR04 module to scan left, front, and right.
 
-## 烧录与排错
+## Flashing and Debugging
 
-常见操作：
+Common operations:
 
-- 使用 HiBurn 烧录 Hi3861 固件。
-- BOOT、RESET 和拨码开关状态会影响能否进入烧录模式。
-- 烧录后如果串口输出还是旧程序，通常是工程没有重新编译、`BUILD.gn` 没保存、或者烧录的 bin 不是最新文件。
+- Use HiBurn to flash Hi3861 firmware.
+- BOOT, RESET, and switch states affect whether the board can enter flashing mode.
+- If the serial output still shows the old program after flashing, the common causes are: the project was not rebuilt, `BUILD.gn` was not saved, or the flashed bin file was not the latest output.
 
 # 8.27
 
-## STM32 电机控制基础
+## STM32 Motor Control Basics
 
-本阶段重点整理 STM32 小车底盘相关代码，包括电机、编码器、PID、定时器和串口协议。
+This stage organized the STM32 chassis code, including motors, encoders, PID, timers, and the serial protocol.
 
-STM32 电机部分核心结构：
+Core STM32 motor structure:
 
-- 使用 TIM4 输出 PWM 控制左右电机速度。
-- 左电机常用通道和方向引脚：PB7、PB14。
-- 右电机常用通道和方向引脚：PB6、PB13。
-- `Set_Pwm()` 负责把目标 PWM 写入定时器比较寄存器。
-- `stm32motor_control(left, right)` 负责把左右速度转换为方向和 PWM。
+- TIM4 outputs PWM to control the left and right motor speeds.
+- Common left motor pins: PB7 and PB14.
+- Common right motor pins: PB6 and PB13.
+- `Set_Pwm()` writes the target PWM values into the timer compare registers.
+- `stm32motor_control(left, right)` converts left and right speed values into direction and PWM output.
 
-注意：
+Notes:
 
-- 后续蓝牙项目中发现速度比例偏小，最终把 `stm32motor_control()` 中的速度换算修正为 `Set_Pwm(speed * 20)` 量级，否则前进速度明显太慢。
-- 电机不动时要同时检查 PWM、方向引脚、电机供电、共地和串口数据是否真的到达 STM32。
+- In the later Bluetooth project, the speed scale was found to be too small. The conversion inside `stm32motor_control()` was eventually adjusted to the level of `Set_Pwm(speed * 20)`, otherwise forward movement was too slow.
+- If the motors do not move, check PWM output, direction pins, motor power, common ground, and whether serial data really reaches the STM32.
 
-## 编码器与 PID
+## Encoders and PID
 
-STM32 侧保留了编码器和 PID 控制的思路：
+The STM32 side kept the design for encoder feedback and PID control:
 
-- 编码器用于测量左右轮实际速度。
-- 定时器周期中读取编码器增量。
-- PID 根据目标速度和实际速度计算 PWM 修正量。
+- Encoders measure the actual speed of the left and right wheels.
+- Encoder increments are read periodically by a timer.
+- PID calculates PWM corrections from the target speed and measured speed.
 
-调试重点：
+Debugging focus:
 
-- 先验证电机能开环转动，再接入编码器闭环。
-- 如果 PID 输出异常，检查编码器方向、计数周期、目标速度单位和 PWM 限幅。
-- 左右电机方向不一致时，优先修正方向引脚逻辑或速度符号。
+- Verify open-loop motor rotation first, then add encoder closed-loop control.
+- If PID output is abnormal, check encoder direction, counting period, target speed units, and PWM limits.
+- If left and right motor directions are inconsistent, fix the direction pin logic or the sign of the speed value first.
 
-## HC-SR04 Tick 定时
+## HC-SR04 Tick Timing
 
-完成超声波测距基础测试。
+Basic ultrasonic distance measurement was completed.
 
-关键点：
+Key points:
 
-- TRIG 输出触发脉冲。
-- ECHO 输入高电平宽度用于计算距离。
-- 使用系统 tick 或定时器计数测量回波持续时间。
-- 需要设置超时，避免无回波时程序卡死。
+- TRIG outputs the trigger pulse.
+- ECHO input pulse width is used to calculate distance.
+- System tick or timer counting is used to measure the ECHO high-level duration.
+- A timeout is required so the program does not block forever when no echo is received.
 
-常见问题：
+Common problems:
 
-- 距离一直为 `-1` 或异常，通常表示 ECHO 没收到有效回波、接线有问题、供电不稳或超时设置不合理。
-- HC-SR04 通常需要 5V 供电，ECHO 回到 3.3V 芯片时要注意电平兼容。
+- If distance is always `-1` or abnormal, ECHO usually did not receive a valid pulse. Possible causes include wiring, unstable power, or unreasonable timeout settings.
+- HC-SR04 usually needs 5 V power. When ECHO returns to a 3.3 V chip, voltage compatibility must be considered.
 
 # 8.28
 
-## 红外对管边缘保护
+## IR Edge Protection
 
-工程位置主要在：
+Main project path:
 
 - `C:\Users\18500\Desktop\summer\SSH-192.168.13.128\2.0Timer\test`
 
-功能目标：
+Goal:
 
-- 使用两个红外对管检测桌面边缘。
-- 发现边缘后立即停车，再后退并转向，避免小车掉落。
+- Use two IR sensors to detect the edge of a table.
+- When an edge is detected, stop immediately, move backward, and turn to avoid falling.
 
-传感器定义：
+Sensor definition:
 
-- 左红外：GPIO14。
-- 右红外：GPIO13。
-- 安全状态：左 `0`、右 `0`。
-- 检测到边缘：对应方向输入变为 `1`。
+- Left IR sensor: GPIO14.
+- Right IR sensor: GPIO13.
+- Safe state: left `0`, right `0`.
+- Edge detected: the corresponding sensor input becomes `1`.
 
-控制逻辑：
+Control logic:
 
-- 正常状态下小车前进。
-- 任意一侧检测到边缘时先停止。
-- 短暂刹车后后退。
-- 根据触发方向执行转向。
-- 转向结束后重新进入检测循环。
+- The car moves forward in the normal state.
+- If either side detects an edge, the car stops first.
+- After a short brake delay, the car moves backward.
+- The car then turns according to the triggered side.
+- After the turn, it returns to the detection loop.
 
-实现要点：
+Implementation notes:
 
-- 使用 `hi_gpio_get_input_val()` 读取 GPIO 输入。
-- Hi3861 不直接驱动电机，而是通过 UART 向 STM32 发送控制帧。
-- 电机控制帧格式为 6 字节：
+- Use `hi_gpio_get_input_val()` to read GPIO input values.
+- Hi3861 does not drive the motors directly. It sends control frames to the STM32 through UART.
+- The motor control frame is 6 bytes:
 
 ```text
 FC dirL speedL dirR speedR FD
 ```
 
-字段说明：
+Field description:
 
-- `FC`：帧头。
-- `dirL`：左电机方向。
-- `speedL`：左电机速度。
-- `dirR`：右电机方向。
-- `speedR`：右电机速度。
-- `FD`：帧尾。
+- `FC`: frame header.
+- `dirL`: left motor direction.
+- `speedL`: left motor speed.
+- `dirR`: right motor direction.
+- `speedR`: right motor speed.
+- `FD`: frame tail.
 
 # 8.30
 
-## 超声波避障小车
+## Ultrasonic Obstacle Avoidance Car
 
-工程位置主要在：
+Main project path:
 
 - `C:\Users\18500\Desktop\summer\test\test2-sg90`
 
-本阶段完成 Hi3861 与 STM32 配合的超声波避障小车。
+This stage completed the ultrasonic obstacle avoidance car using Hi3861 and STM32 together.
 
-## Hi3861 部分
+## Hi3861 Side
 
-Hi3861 负责传感器检测和决策：
+Hi3861 handles sensor detection and decision-making:
 
-- SG90 舵机：GPIO2。
-- HC-SR04 TRIG：GPIO7。
-- HC-SR04 ECHO：GPIO8。
-- UART2 TX/RX：GPIO11、GPIO12。
-- 串口波特率：115200。
+- SG90 servo: GPIO2.
+- HC-SR04 TRIG: GPIO7.
+- HC-SR04 ECHO: GPIO8.
+- UART2 TX/RX: GPIO11 and GPIO12.
+- UART baud rate: 115200.
 
-控制流程：
+Control flow:
 
-- 启动后先发送停止，避免小车上电乱动。
-- 舵机带动超声波模块扫描前方、左侧、右侧距离。
-- 前方距离小于阈值时停止并判断左右方向。
-- 选择更空旷的一侧原地转向。
-- 转向后继续前进和检测。
+- Send a stop command first after startup to prevent accidental movement.
+- The servo rotates the ultrasonic module to scan front, left, and right distances.
+- If the front distance is below the threshold, stop and compare the left and right distances.
+- Turn in place toward the side with more free space.
+- Continue forward movement and detection after turning.
 
-最终使用的避障阈值：
+Final obstacle threshold:
 
-- 障碍物距离小于约 20cm 时触发避障。
+- Trigger obstacle avoidance when the obstacle is closer than about 20 cm.
 
-调试中做过的关键修改：
+Important debugging changes:
 
-- 去掉启动时强制前进，避免刚上电就冲出去。
-- 去掉不稳定的后退兜底逻辑，改成更直接的停止和原地转向。
-- 修正转向动作，让小车固定原地转向，而不是边走边转。
+- Removed forced forward movement at startup to prevent the car from rushing forward after power-on.
+- Removed the unstable backward fallback logic and changed to a more direct stop-and-turn behavior.
+- Fixed the turning action so the car turns in place instead of turning while moving forward.
 
-## STM32 部分
+## STM32 Side
 
-STM32 负责接收 Hi3861 的串口指令并驱动底盘电机。
+STM32 receives serial commands from Hi3861 and drives the chassis motors.
 
-核心点：
+Core points:
 
-- USART 接收 6 字节电机控制帧。
-- TIM4 输出 PWM。
-- PB7、PB14 控制左电机。
-- PB6、PB13 控制右电机。
-- 根据左右速度的正负决定前进、后退和转向。
+- USART receives the 6-byte motor control frame.
+- TIM4 outputs PWM.
+- PB7 and PB14 control the left motor.
+- PB6 and PB13 control the right motor.
+- The sign of the left and right speed values determines forward, backward, and turning motion.
 
-调试方法：
+Debugging method:
 
-- 先用固定 PWM 测试左右电机是否能转。
-- 再用串口助手或 Hi3861 发送固定帧测试解析。
-- 最后接入超声波避障逻辑。
+- First test both motors with fixed PWM.
+- Then use a serial tool or Hi3861 to send fixed frames and verify parsing.
+- Finally connect the ultrasonic obstacle avoidance logic.
 
 # 8.31
 
-## AP3216C 光照检测与 STM32 灯光控制
+## AP3216C Light Detection and STM32 LED Control
 
-工程位置主要在：
+Main project path:
 
 - `C:\Users\18500\Desktop\summer\SSH-192.168.13.128\9.0AP3216`
 
-本阶段完成 AP3216C 环境光检测，并通过 Hi3861 串口控制 STM32 上的 WS2812 灯。
+This stage completed AP3216C ambient light detection and used Hi3861 serial output to control WS2812 LEDs on STM32.
 
-## Hi3861 部分
+## Hi3861 Side
 
-硬件连接：
+Hardware connections:
 
-- I2C0 SDA：GPIO10。
-- I2C0 SCL：GPIO9。
-- AP3216C I2C 地址：`0x3C`。
-- OLED 使用 SSD1306。
-- UART2 向 STM32 发送灯光命令。
-- UART2 波特率：9600。
+- I2C0 SDA: GPIO10.
+- I2C0 SCL: GPIO9.
+- AP3216C I2C address: `0x3C`.
+- OLED uses SSD1306.
+- UART2 sends LED commands to STM32.
+- UART2 baud rate: 9600.
 
-功能：
+Functions:
 
-- 初始化 AP3216C。
-- 读取 IR、ALS、PS 数据。
-- OLED 显示传感器数据。
-- 根据 ALS 环境光强度控制 LED。
+- Initialize AP3216C.
+- Read IR, ALS, and PS data.
+- Display sensor data on OLED.
+- Control LED state according to ALS ambient light value.
 
-控制规则：
+Control rule:
 
-- `ALS <= 50`：认为环境较暗，发送 `L1\n`，STM32 点亮 WS2812。
-- `ALS > 50`：认为环境较亮，发送 `L0\n`，STM32 关闭 WS2812。
+- `ALS <= 50`: treat the environment as dark, send `L1\n`, and STM32 turns on the WS2812 LEDs.
+- `ALS > 50`: treat the environment as bright, send `L0\n`, and STM32 turns off the WS2812 LEDs.
 
-重要修正：
+Important fix:
 
-- 原先只判断 `als == 0`，导致暗光但不为 0 时无法开灯。
-- 后来改成 `als <= 50`，更符合实际环境光变化。
+- The original logic only checked `als == 0`, so dark conditions with non-zero ALS values could not turn on the LEDs.
+- It was later changed to `als <= 50`, which better matches real ambient light behavior.
 
-## STM32 部分
+## STM32 Side
 
-STM32 侧作为灯光接收端：
+STM32 works as the LED command receiver:
 
-- USART1 波特率 9600。
-- 接收 `L1` 或 `L0` 文本命令。
-- `L1`：全部 WS2812 点亮为白色。
-- `L0`：全部 WS2812 熄灭。
+- USART1 baud rate: 9600.
+- Receives `L1` or `L0` text commands.
+- `L1`: turn all WS2812 LEDs white.
+- `L0`: turn all WS2812 LEDs off.
 
-清理内容：
+Cleanup:
 
-- 为了让灯光控制工程更干净，去掉了无关的电机、编码器、PWM 控制代码。
-- 保留串口接收和 WS2812 控制所需代码。
+- Unrelated motor, encoder, and PWM code was removed to keep the LED control project clean.
+- Only serial receiving and WS2812 control code was kept.
 
-## AP3216C 排错
+## AP3216C Debugging
 
-出现过的问题：
+Observed issue:
 
 ```text
 AP3216C reset failed, err=0x80001182
 ```
 
-含义：
+Meaning:
 
-- I2C 访问没有收到 ACK，通常是设备没有正确响应。
+- The I2C access did not receive an ACK, which usually means the device did not respond correctly.
 
-排查方向：
+Debugging direction:
 
-- 检查 SDA/SCL 是否接反。
-- 检查 VCC/GND 是否稳定。
-- 检查 AP3216C 地址是否正确。
-- 检查线是否松动。
+- Check whether SDA and SCL are reversed.
+- Check whether VCC and GND are stable.
+- Check whether the AP3216C address is correct.
+- Check whether the cable is loose.
 
-当时最终通过重新插拔连接线恢复正常。
+At that time, reconnecting the cable fixed the issue.
 
 # 9.1
 
-## 10.0SUM 综合项目
+## 10.0SUM Integrated Project
 
-本阶段把前面多个模块整合成智能小车综合项目。
+This stage integrated multiple previous modules into one smart car project.
 
-主要功能：
+Main functions:
 
-- 红外对管边缘保护。
-- HC-SR04 超声波避障。
-- OLED 显示传感器数据。
-- SHT20 温湿度读取。
-- AP3216C IR、ALS、PS 读取。
-- WiFi 连接。
-- 华为云 MQTT 实时数据上传。
-- Java Web 端通过 AMQP 接收云端数据并显示。
+- IR edge protection.
+- HC-SR04 ultrasonic obstacle avoidance.
+- OLED sensor display.
+- SHT20 temperature and humidity reading.
+- AP3216C IR, ALS, and PS reading.
+- WiFi connection.
+- Huawei Cloud MQTT real-time data upload.
+- Java Web dashboard receiving cloud data through AMQP.
 
-上传数据字段：
+Uploaded data fields:
 
-- `temperature`：温度。
-- `humidity`：湿度。
-- `ap_ir`：AP3216C 红外值。
-- `ap_als`：AP3216C 环境光值。
-- `ap_ps`：AP3216C 接近值。
-- `edge_left`：左边缘检测。
-- `edge_right`：右边缘检测。
-- `distance_cm`：超声波距离。
-- `led_on`：灯光状态。
+- `temperature`: temperature.
+- `humidity`: humidity.
+- `ap_ir`: AP3216C IR value.
+- `ap_als`: AP3216C ambient light value.
+- `ap_ps`: AP3216C proximity value.
+- `edge_left`: left edge detection state.
+- `edge_right`: right edge detection state.
+- `distance_cm`: ultrasonic distance.
+- `led_on`: LED state.
 
-## Hi3861 综合逻辑
+## Hi3861 Integrated Logic
 
-任务划分：
+Task division:
 
-- Task 1：小车安全控制，包括红外边缘保护和超声波避障。
-- Task 2：OLED 显示温湿度、AP3216C 数据和 LED 状态。
-- Task 3：WiFi 扫描、连接和 DHCP。
-- Task 4：华为云 MQTT 连接和数据上传。
+- Task 1: car safety control, including IR edge protection and ultrasonic obstacle avoidance.
+- Task 2: OLED display for temperature, humidity, AP3216C data, and LED state.
+- Task 3: WiFi scanning, connection, and DHCP.
+- Task 4: Huawei Cloud MQTT connection and data upload.
 
-启动日志中出现以下信息表示综合工程运行正常：
+The following startup logs indicate that the integrated project is running correctly:
 
 ```text
 10.0SUM project start.
@@ -315,119 +315,119 @@ Task 3 running: WiFi connect
 Task 4 running: Huawei Cloud MQTT realtime upload
 ```
 
-## 华为云连接
+## Huawei Cloud Connection
 
-遇到过 MQTT 连接返回码问题：
+MQTT connection return code issue:
 
-- `CONNACK code=4` 表示用户名或密码不正确，或者 clientId、认证参数格式不符合平台要求。
-- 后来通过调整 clientId 时间戳格式解决。
+- `CONNACK code=4` means the username or password is incorrect, or the clientId/authentication parameters do not match the platform requirements.
+- The issue was later fixed by adjusting the clientId timestamp format.
 
-WiFi 连接流程：
+WiFi connection flow:
 
-- 扫描目标热点。
-- 找到目标 SSID 后连接。
-- DHCP 成功后再允许 MQTT 连接。
-- MQTT 连接成功后周期上传 JSON 数据。
+- Scan for the target hotspot.
+- Connect after the target SSID is found.
+- Allow MQTT connection only after DHCP succeeds.
+- Upload JSON data periodically after MQTT is connected.
 
-## Web 看板
+## Web Dashboard
 
-工程位置主要在：
+Main project path:
 
 - `C:\Users\18500\Desktop\summer\test\test3-html`
 
-主要文件：
+Main files:
 
-- `car.html`：前端页面。
-- `CarCloudServer.java`：Java 后端，接收 AMQP 数据并转发给页面。
-- `pom.xml`：Maven 配置。
-- `README_WEB.md`：Web 端说明。
+- `car.html`: frontend page.
+- `CarCloudServer.java`: Java backend, receives AMQP data and forwards it to the page.
+- `pom.xml`: Maven configuration.
+- `README_WEB.md`: Web-side documentation.
 
-访问地址：
+Access URL:
 
 ```text
 http://localhost:8080/car.html
 ```
 
-AMQP 信息：
+AMQP information:
 
-- 队列：`qst_queue`。
-- 华为云应用侧地址包含 `iotda-app.cn-north-4`。
-- 端口：5671。
+- Queue: `qst_queue`.
+- Huawei Cloud application-side host contains `iotda-app.cn-north-4`.
+- Port: 5671.
 
-## 延时问题
+## Delay Issue
 
-调试时发现一个重要问题：
+An important timing issue was found during debugging:
 
-- Hi3861 当前工程中 `osDelay()` 的 tick 约为 10ms。
-- 因此 `osDelay(5000)` 实际约等于 50 秒，而不是 5 秒。
+- In the current Hi3861 project, one `osDelay()` tick is about 10 ms.
+- Therefore, `osDelay(5000)` is about 50 seconds, not 5 seconds.
 
-修正方式：
+Fix:
 
-- 增加 `DelayMs()` 包装函数。
-- 定义 `OS_TICK_MS 10`。
-- 所有需要按毫秒理解的延时统一走 `DelayMs()`。
-- 数据上传周期调整为约 2 秒。
+- Added a `DelayMs()` wrapper function.
+- Defined `OS_TICK_MS 10`.
+- All delays that should be treated as milliseconds were changed to use `DelayMs()`.
+- Data upload period was adjusted to about 2 seconds.
 
-## 边缘保护抖动修正
+## Edge Protection Jitter Fix
 
-问题：
+Problem:
 
-- 小车在边缘附近动作不稳定，可能刚后退一点又重新触发。
+- The car behaved unstably near the table edge. It could move backward slightly and then trigger edge detection again.
 
-修正参数：
+Adjusted parameters:
 
-- `BACKWARD_TIME_MS 350`。
-- `EDGE_TURN_TIME_MS 350`。
-- `EDGE_RELEASE_TIME_MS 250`。
+- `BACKWARD_TIME_MS 350`.
+- `EDGE_TURN_TIME_MS 350`.
+- `EDGE_RELEASE_TIME_MS 250`.
 
-效果：
+Result:
 
-- 检测到边缘后后退更充分。
-- 转向和释放时间更稳定。
-- 小车不容易在边缘附近反复卡住。
+- The car moves backward farther after detecting an edge.
+- Turning and release timing are more stable.
+- The car is less likely to get stuck repeatedly near the edge.
 
 # 9.2
 
-## 蓝牙手机控制小车
+## Bluetooth Phone Control Car
 
-工程位置主要在：
+Main project path:
 
 - `C:\Users\18500\Desktop\summer\test\test4-bluetooth`
 
-目标：
+Goal:
 
-- 手机通过蓝牙调试器连接蓝牙模块。
-- 蓝牙模块把手机发送的字符转成串口数据给 Hi3861。
-- Hi3861 解析字符命令。
-- Hi3861 再把电机控制帧发给 STM32。
-- STM32 最终驱动小车运动。
+- The phone connects to the Bluetooth module through a Bluetooth debugging app.
+- The Bluetooth module converts the character sent by the phone into serial data for Hi3861.
+- Hi3861 parses the character command.
+- Hi3861 sends a motor control frame to STM32.
+- STM32 finally drives the car motors.
 
-整体链路：
+Overall data path:
 
 ```text
 iPhone LightBlue
-    -> BLE 蓝牙模块
+    -> BLE Bluetooth module
     -> Hi3861 UART1 RX
-    -> Hi3861 软件 UART TX
+    -> Hi3861 software UART TX
     -> STM32 USART1 RX
-    -> STM32 电机 PWM
+    -> STM32 motor PWM
 ```
 
-## 手机端协议
+## Phone-Side Protocol
 
-手机每次发送一个 ASCII 字符：
+The phone sends one ASCII character each time:
 
 ```text
-O: 停止
-W: 前进
-A: 左转
-D: 右转
-S: 后退
-I: 左右速度 100,100
-K: 左右速度 150,150
+O: stop
+W: forward
+A: turn left
+D: turn right
+S: backward
+I: left/right speed 100,100
+K: left/right speed 150,150
 ```
 
-对应控制：
+Corresponding control logic:
 
 ```c
 case 'O':
@@ -453,79 +453,79 @@ case 'K':
     break;
 ```
 
-## iOS LightBlue 使用
+## iOS LightBlue Usage
 
-LightBlue 可以用于 iOS 端调试，但要满足两个条件：
+LightBlue can be used for iOS debugging, but two conditions must be met:
 
-- 蓝牙模块必须是 BLE 模块，iPhone 不支持传统 SPP 蓝牙串口。
-- 在 LightBlue 中连接设备后，要找到可写的 Characteristic，把 `W`、`A`、`D`、`O` 等字符以 ASCII 或 UTF-8 写入。
+- The Bluetooth module must be a BLE module. iPhone does not support classic Bluetooth SPP serial communication.
+- After connecting to the device in LightBlue, find a writable characteristic and write `W`, `A`, `D`, `O`, and other commands as ASCII or UTF-8 text.
 
-如果 LightBlue 搜不到车：
+If LightBlue cannot find the car:
 
-- 先确认蓝牙模块是否是 BLE。
-- 确认模块已经上电并处于广播状态。
-- 确认 Hi3861 程序没有因为 UART 初始化失败提前退出。
-- 如果模块已经被其他手机连接，先断开后再搜索。
+- Confirm that the Bluetooth module is BLE.
+- Confirm that the module is powered and advertising.
+- Confirm that the Hi3861 program did not exit early because UART initialization failed.
+- If the module is already connected to another phone, disconnect it first and then scan again.
 
-## Hi3861 部分
+## Hi3861 Side
 
-最初使用硬件 UART：
+The first implementation used hardware UART:
 
-- UART1 连接蓝牙模块，接收手机命令。
-- UART2 连接 STM32，发送电机控制帧。
+- UART1 connected to the Bluetooth module and received phone commands.
+- UART2 connected to STM32 and sent motor control frames.
 
-后来遇到问题：
+Later, these errors appeared:
 
 ```text
 Failed to init UART1, err code: 4294967295
 Failed to init motor UART2, err code: 4294967295
 ```
 
-`4294967295` 实际上是无符号打印出来的 `-1`，表示 UART 初始化失败。
+`4294967295` is actually `-1` printed as an unsigned value, meaning UART initialization failed.
 
-原因判断：
+Diagnosis:
 
-- 当前 Hi3861 工程或板级配置下，UART1 和 UART2 同时初始化不稳定。
-- 一旦 UART 初始化失败，程序可能无法继续正确接收蓝牙数据或发送电机控制帧。
+- In the current Hi3861 project or board-level pin configuration, initializing UART1 and UART2 together was unstable.
+- Once UART initialization failed, the program could not reliably receive Bluetooth data or send motor control frames.
 
-最终方案：
+Final solution:
 
-- UART1 只用于接收蓝牙模块数据。
-- 放弃第二路硬件 UART。
-- 用 GPIO11 模拟软件 UART TX，把电机控制帧发给 STM32。
+- UART1 is used only to receive data from the Bluetooth module.
+- The second hardware UART was abandoned.
+- GPIO11 is used as a software UART TX pin to send motor control frames to STM32.
 
-软件 UART 参数：
+Software UART parameters:
 
-- 波特率：9600。
-- 1 bit 时间：约 104us。
-- TX 引脚：GPIO11。
-- 空闲电平：高电平。
-- 起始位：低电平。
-- 数据位：8 位，低位先发。
-- 停止位：高电平。
+- Baud rate: 9600.
+- One bit time: about 104 us.
+- TX pin: GPIO11.
+- Idle level: high.
+- Start bit: low.
+- Data bits: 8 bits, LSB first.
+- Stop bit: high.
 
-为了提高可靠性：
+Reliability improvements:
 
-- 发送普通运动指令时，连续重复发送 3 次电机帧。
-- 发送停止指令 `O` 时，连续重复发送 8 次电机帧。
-- 发送软件 UART 字节时使用 `osKernelLock()`，减少任务切换对 bit 时间的影响。
-- 蓝牙接收循环缩短到约 10ms，提高响应速度。
+- Normal motion commands send the motor frame 3 times.
+- The stop command `O` sends the motor frame 8 times.
+- `osKernelLock()` is used while sending software UART bytes to reduce timing interference from task switching.
+- The Bluetooth receive loop was shortened to about 10 ms to improve responsiveness.
 
-## Hi3861 到 STM32 的帧格式
+## Hi3861-to-STM32 Frame Format
 
-仍然使用 6 字节协议：
+The 6-byte protocol is still used:
 
 ```text
 FC dirL speedL dirR speedR FD
 ```
 
-速度和方向约定：
+Speed and direction convention:
 
-- 正数：前进。
-- 负数：后退。
-- `0`：停止。
+- Positive value: forward.
+- Negative value: backward.
+- `0`: stop.
 
-9.2 最终常用动作：
+Final common actions on 9.2:
 
 ```text
 O -> 0, 0
@@ -537,104 +537,104 @@ I -> 100, 100
 K -> 150, 150
 ```
 
-说明：
+Notes:
 
-- `A` 和 `D` 使用左右轮反向，实现原地转向。
-- `W` 前进速度后来提高到 150，解决前进太慢的问题。
-- `O` 停止命令重复发送更多次，解决有时不能马上停的问题。
+- `A` and `D` use opposite wheel directions to turn in place.
+- The forward speed for `W` was increased to 150 to fix slow forward movement.
+- The stop command `O` repeats the frame more times to fix delayed stopping.
 
-## STM32 部分
+## STM32 Side
 
-STM32 侧需要接收 Hi3861 发来的软件 UART 数据。
+STM32 receives the software UART data from Hi3861.
 
-关键配置：
+Key configuration:
 
-- USART1。
-- 波特率 9600。
-- 接收 Hi3861 GPIO11 输出的数据。
-- GND 必须与 Hi3861 共地。
+- USART1.
+- Baud rate: 9600.
+- Receives data from Hi3861 GPIO11.
+- GND must be shared between Hi3861 and STM32.
 
-STM32 接收逻辑：
+STM32 receive logic:
 
-- 支持解析 6 字节电机控制帧。
-- 也可以兼容单字符命令，便于直接用串口助手测试。
-- 收到合法帧后调用 `stm32motor_control(left, right)`。
+- Parses the 6-byte motor control frame.
+- Can also support single-character commands for direct serial-tool testing.
+- Calls `stm32motor_control(left, right)` after receiving a valid frame.
 
-速度修正：
+Speed fix:
 
-- 一开始 STM32 侧速度比例太小，导致前进很慢。
-- 后来在 `stm32motor_control()` 中扩大 PWM 换算比例。
-- 采用 `Set_Pwm(speed * 20)` 后，小车前进速度正常。
+- At first, the STM32 speed scale was too small, so forward movement was very slow.
+- The PWM conversion ratio inside `stm32motor_control()` was increased.
+- After using `Set_Pwm(speed * 20)`, the car moved forward normally.
 
-## 为什么一开始只有 A、D、O 有反应
+## Why Only A, D, and O Worked at First
 
-排查结论：
+Debugging conclusion:
 
-- 蓝牙到 Hi3861 的接收基本是通的，因为串口日志能看到 `UART recv: W`、`UART recv: O`。
-- 小车没动主要不是手机协议问题，而是 Hi3861 到 STM32 的发送链路和 STM32 PWM 速度比例问题。
-- `A`、`D`、`O` 更容易观察到，是因为转向和停止对电机状态变化更明显。
-- `W`、`S`、`I`、`K` 受速度比例、帧丢失和接收时序影响更明显。
+- Bluetooth receiving on Hi3861 was basically working because the serial logs showed `UART recv: W` and `UART recv: O`.
+- The main problem was not the phone protocol. It was the sending link from Hi3861 to STM32 and the STM32 PWM speed scale.
+- `A`, `D`, and `O` were easier to observe because turning and stopping produced more obvious motor-state changes.
+- `W`, `S`, `I`, and `K` were more affected by speed scaling, frame loss, and receive timing.
 
-最终通过以下方式改善：
+The final improvements were:
 
-- Hi3861 使用软件 UART TX，绕开 UART1/UART2 同时初始化失败。
-- 降低到 9600 波特率，提高软件 UART 可靠性。
-- 重复发送控制帧。
-- 停止命令重复更多次。
-- STM32 扩大 PWM 输出比例。
+- Use Hi3861 software UART TX to avoid UART1/UART2 initialization conflicts.
+- Reduce baud rate to 9600 to improve software UART reliability.
+- Send control frames repeatedly.
+- Repeat the stop command more times.
+- Increase the STM32 PWM output scale.
 
-## 不使用模拟 UART 的替代方案
+## Alternatives to Software UART
 
-如果不用 GPIO 模拟 UART，可以考虑：
+If software UART is not used, possible alternatives include:
 
-- 重新整理硬件 UART 资源，让蓝牙和 STM32 分别使用不同可用 UART，但需要确认 Hi3861 当前 SDK 和板级复用配置支持。
-- 让手机蓝牙模块直接连接 STM32，由 STM32 同时负责蓝牙命令解析和电机控制，但这会绕开 Hi3861，不符合本项目“手机连 Hi3861 再控制 STM32”的结构。
-- 使用 I2C，由 Hi3861 做主机，STM32 做从机，Hi3861 发送速度命令给 STM32。
-- 使用 SPI，由 Hi3861 做主机，STM32 做从机，速度更高但接线和协议更复杂。
-- 使用单线 GPIO 脉冲编码，只适合命令很少的情况，不适合扩展速度数据。
+- Reorganize hardware UART resources so Bluetooth and STM32 use separate available UARTs. This requires confirming that the current Hi3861 SDK and board pin-mux configuration support it.
+- Connect the phone Bluetooth module directly to STM32, letting STM32 parse Bluetooth commands and drive the motors. This bypasses Hi3861, so it does not match the project structure of "phone connects to Hi3861, then Hi3861 controls STM32".
+- Use I2C, with Hi3861 as master and STM32 as slave. Hi3861 sends speed commands to STM32 through I2C.
+- Use SPI, with Hi3861 as master and STM32 as slave. SPI is faster but needs more wiring and a more complex protocol.
+- Use single-wire GPIO pulse encoding. This is only suitable for very few commands and is not good for scalable speed data.
 
-## I2C 方案说明
+## I2C Option
 
-如果改成 I2C：
+If the link is changed to I2C:
 
-- Hi3861 作为 I2C Master。
-- STM32 作为 I2C Slave。
-- Hi3861 收到手机蓝牙字符后，不再模拟 UART，而是通过 I2C 写入一帧命令。
-- STM32 I2C 中断或轮询接收命令，然后调用 `stm32motor_control()`。
+- Hi3861 acts as the I2C master.
+- STM32 acts as the I2C slave.
+- After Hi3861 receives a Bluetooth character from the phone, it writes one command frame through I2C instead of using software UART.
+- STM32 receives the command through I2C interrupt or polling, then calls `stm32motor_control()`.
 
-示例帧仍可沿用：
+The same frame format can still be used:
 
 ```text
 FC dirL speedL dirR speedR FD
 ```
 
-优点：
+Advantages:
 
-- 只需要 SDA、SCL、GND 三根线。
-- 一主一从结构清晰，Hi3861 很适合做主机统一调度。
-- 不依赖精确 bit-bang 延时，比软件 UART 更稳。
+- Only SDA, SCL, and GND are required.
+- The master-slave structure is clear, and Hi3861 is suitable as the central controller.
+- It does not depend on precise bit-bang timing, so it is more stable than software UART.
 
-缺点：
+Disadvantages:
 
-- STM32 从机 I2C 配置比普通串口复杂。
-- 双方地址、ACK、时序和中断处理需要调好。
-- I2C 总线需要上拉电阻，线太长时容易不稳定。
-- 如果总线上还挂了 OLED、AP3216C 等设备，要避免地址冲突和访问阻塞。
+- STM32 I2C slave configuration is more complex than normal UART receiving.
+- Address, ACK, timing, and interrupt handling must be configured correctly.
+- The I2C bus needs pull-up resistors, and long wires can make it unstable.
+- If OLED, AP3216C, or other devices are also on the bus, address conflicts and bus blocking must be avoided.
 
-适合场景：
+Suitable when:
 
-- 后续要扩展更多 Hi3861 到 STM32 的控制数据。
-- 想减少 UART 资源冲突。
-- 能接受 STM32 侧增加 I2C Slave 接收代码。
+- More Hi3861-to-STM32 control data needs to be added later.
+- UART resource conflicts need to be reduced.
+- Adding STM32 I2C slave receive code is acceptable.
 
-## 9.2 最终结论
+## Final 9.2 Conclusion
 
-当前最可用方案：
+The current most usable solution:
 
-- 手机使用 LightBlue 发送单字符命令。
-- 蓝牙模块把字符通过 UART1 发给 Hi3861。
-- Hi3861 解析 `O/W/A/D/S/I/K`。
-- Hi3861 用 GPIO11 软件 UART 发送电机帧给 STM32。
-- STM32 USART1 接收帧并驱动电机。
+- The phone uses LightBlue to send single-character commands.
+- The Bluetooth module sends the character to Hi3861 through UART1.
+- Hi3861 parses `O/W/A/D/S/I/K`.
+- Hi3861 sends motor frames to STM32 through GPIO11 software UART.
+- STM32 USART1 receives the frames and drives the motors.
 
-这个方案保留了“手机连 Hi3861，再由 Hi3861 控制 STM32”的项目结构，同时绕开了 Hi3861 双硬件 UART 初始化失败的问题。
+This solution keeps the project structure of "phone connects to Hi3861, then Hi3861 controls STM32" while avoiding the Hi3861 dual-hardware-UART initialization problem.
