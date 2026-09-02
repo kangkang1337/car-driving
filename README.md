@@ -600,3 +600,158 @@ LED command: L1 / L0
 ```
 
 Both the Hi3861 and STM32 firmware must be rebuilt and burned for LED control to work.
+
+
+# 9.2
+
+## Purpose
+
+The STM32 is responsible for low-level motor control. It receives control commands from the Hi3861 and drives the car motors through PWM.
+
+## Main Functions
+
+The STM32 firmware provides these car control functions:
+
+```c
+void car_stop(void);
+void car_forward(void);
+void car_left(void);
+void car_right(void);
+void car_backward(void);
+void stm32motor_control(int left_motor, int right_motor);
+```
+
+## UART Configuration
+
+The STM32 receives data through USART1.
+
+```text
+USART1_TX: PA9
+USART1_RX: PA10
+Baud rate: 9600
+Data bits: 8
+Stop bits: 1
+Parity: none
+```
+
+The baud rate is set in `main.c`:
+
+```c
+uart_init(9600);
+```
+
+## Motor Frame Format
+
+The STM32 receives a 6-byte frame:
+
+```text
+0xFC  left_dir  left_speed  right_dir  right_speed  0xFD
+```
+
+Direction values:
+
+```text
+0: Forward
+1: Reverse
+```
+
+Example: move forward at speed 150:
+
+```text
+FC 00 96 00 96 FD
+```
+
+Example: stop:
+
+```text
+FC 00 00 00 00 FD
+```
+
+## Frame Parsing
+
+When a complete frame is received, STM32 converts it into left and right motor speeds:
+
+```c
+if (motor_frame[1] != 0) {
+    left_speed = -left_speed;
+}
+
+if (motor_frame[3] != 0) {
+    right_speed = -right_speed;
+}
+```
+
+Then it sends the speed values to the PWM driver:
+
+```c
+Set_Pwm(left_speed * 20, right_speed * 20);
+```
+
+The `* 20` converts the command speed range into the PWM output range.
+
+## Single-Character Commands
+
+The STM32 can also parse single-character commands directly:
+
+```text
+O: Stop
+W: Move forward
+A: Turn left
+D: Turn right
+S: Move backward
+I: Low-speed forward
+K: High-speed forward
+```
+
+Command mapping:
+
+```text
+O -> car_stop()
+W -> car_forward()
+A -> car_left()
+D -> car_right()
+S -> car_backward()
+I -> stm32motor_control(100, 100)
+K -> stm32motor_control(150, 150)
+```
+
+## Motor Speed Mapping
+
+```text
+W:  100, 100
+A:  -50, 150
+D:  150, -50
+S: -150, -150
+I:  100, 100
+K:  150, 150
+O:    0, 0
+```
+
+## PWM Output
+
+The motor driver uses TIM4 PWM output:
+
+```text
+Left motor PWM:  TIM4_CH2 / PB7
+Right motor PWM: TIM4_CH1 / PB6
+Left direction:  PB14
+Right direction: PB13
+```
+
+The PWM period is:
+
+```c
+#define PWM_MAX 3599
+```
+
+## Startup Flow
+
+During startup, the STM32 initializes the clock, UART, delay, PWM, motors, and LEDs:
+
+```c
+uart_init(9600);
+PWM_Init(PWM_MAX, 0);
+Motor_Stop();
+```
+
+After initialization, the STM32 waits for UART commands and updates the motor output immediately after receiving valid data.
