@@ -1,0 +1,66 @@
+# test6-way
+
+巡线实验工程。黑线应位于左右两个红外传感器中间，地板返回 `0`，黑线返回 `1`。
+
+## Hi3861
+
+- 主程序：`way.c`
+- 构建目标：`static_library("way")`
+- 父级 `applications/sample/wifi-iot/app/BUILD.gn` 中启用：
+
+```gn
+"test6-way:way",
+```
+
+已移除 WiFi、蓝牙、云端、OLED、SHT20、AP3216C、超声波和舵机依赖。
+
+引脚：
+
+- 左红外：GPIO13
+- 右红外：GPIO14
+- 到 STM32：UART2，GPIO11 TX，GPIO12 RX，115200
+
+判断：
+
+- `0,0`：黑线在两传感器中间，直行
+- `1,0`：左传感器压到黑线，立即向左短修正
+- `0,1`：右传感器压到黑线，立即向右短修正
+- `1,1`：横向黑线标记
+
+终点按“黑-白-黑”判定：第一根横向黑线宽约 `1.9cm`，中间白色间隔约 `1.5cm`，再遇到第二根横向黑线才算终点。检测终点时，只要传感器从第一根黑线进入非双黑状态，就立刻开始寻找第二根黑线，避免中间白线太短导致漏检。检测到终点后停车并发送闪灯命令。
+
+主循环每 `10ms` 轮询一次红外状态。修正不是固定长时间转向，而是每次按最新红外值发一帧短修正命令，下一轮马上重新判断，避免压线后继续转过头。
+
+如果双黑不是终点，就按岔路口处理，不再倒车。第 `1` 次双黑向左偏，第 `2` 次双黑向右偏，后续按奇偶交替。偏向动作结束后继续进入 `10ms` 轮询巡线。
+
+## STM32
+
+Keil 工程：`TIMER/USER/TIMER.uvprojx`
+
+保留模块：
+
+- USART1 接收 Hi3861 控制帧
+- TIM4 PWM 电机控制
+- WS2812 车灯控制
+
+已移除 PID/编码器工程引用。收到 `E\n` 后停车并循环闪烁所有车灯。
+
+## 调参入口
+
+`way.c` 中优先调整这些值：
+
+- `CRUISE_SPEED`
+- `CORRECT_FAST_SPEED`
+- `CORRECT_SLOW_SPEED`
+- `JUNCTION_BIAS_MS`
+- `JUNCTION_LEFT_FAST_SPEED`
+- `JUNCTION_LEFT_SLOW_SPEED`
+- `JUNCTION_RIGHT_FAST_SPEED`
+- `JUNCTION_RIGHT_SLOW_SPEED`
+- `SAMPLE_PERIOD_MS`
+- `FINISH_DETECT_SPEED`
+- `FINISH_FIRST_RELEASE_TIMEOUT_MS`
+- `FINISH_WHITE_GAP_MAX_MS`
+- `FINISH_SECOND_CONFIRM_MS`
+
+如果左右修正方向和实车相反，交换 `CarCorrectLeft()` 和 `CarCorrectRight()` 中的左右速度即可。
