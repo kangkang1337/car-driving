@@ -638,3 +638,279 @@ The current most usable solution:
 - STM32 USART1 receives the frames and drives the motors.
 
 This solution keeps the project structure of "phone connects to Hi3861, then Hi3861 controls STM32" while avoiding the Hi3861 dual-hardware-UART initialization problem.
+
+
+# 2026-09-03 README
+
+## Project: test6-way Line Following Experiment
+
+Today’s work focused on the `test6-way` line-following experiment for the QST smart car.
+
+The experiment path is:
+
+```text
+C:\Users\18500\Desktop\summer\test\test6-way
+```
+
+## Goal
+
+The car follows a black line using two infrared sensors.
+
+The black line should stay between the two IR sensors. The sensors should not ride directly on the black line during normal forward movement.
+
+Sensor values:
+
+```text
+Floor: 0
+Black line: 1
+```
+
+There are branch paths on the track. A wrong branch ends with one horizontal black line. The correct finish area has two horizontal black lines, with a white gap between them.
+
+Finish mark size:
+
+```text
+First black line width: about 1.9 cm
+White gap: about 1.5 cm
+Second black line width: about 1.9 cm
+```
+
+When the car reaches the correct finish mark, it stops and flashes all car lights.
+
+## Reference Project
+
+The main reference project was:
+
+```text
+C:\Users\18500\Desktop\summer\test\test5-blacktape
+```
+
+The `test5-blacktape` project was copied into the `test6-way` working directory before modification.
+
+Unrelated modules were removed to reduce interference:
+
+```text
+WiFi
+Bluetooth
+Huawei Cloud
+OLED
+SHT20
+AP3216C
+Ultrasonic sensor
+SG90 servo
+PID
+Encoder
+```
+
+## Hi3861 Side
+
+The Hi3861 program is:
+
+```text
+way.c
+```
+
+The build target is:
+
+```gn
+static_library("way")
+```
+
+The parent OpenHarmony application `BUILD.gn` should enable:
+
+```gn
+"13.0_way:way",
+```
+
+or the matching folder name used in the Linux OpenHarmony workspace.
+
+Main hardware usage:
+
+```text
+Left IR sensor: GPIO13
+Right IR sensor: GPIO14
+Motor UART to STM32: UART2
+UART2 TX: GPIO11
+UART2 RX: GPIO12
+Baud rate: 115200
+```
+
+The Hi3861 reads the two IR sensors and sends motor control frames to STM32.
+
+Motor frame format:
+
+```text
+0xFC left_dir left_speed right_dir right_speed 0xFD
+```
+
+## Line Following Logic
+
+The main loop polls the IR sensors every `10 ms`.
+
+Normal states:
+
+```text
+0,0: line is between the two sensors, move forward
+1,0: left sensor sees black, bias left
+0,1: right sensor sees black, bias right
+1,1: both sensors see black, handle as a marker/junction event
+```
+
+Speed settings:
+
+```c
+#define CRUISE_SPEED 125
+#define CORRECT_FAST_SPEED 145
+#define CORRECT_SLOW_SPEED 55
+#define SAMPLE_PERIOD_MS 10
+```
+
+The correction is not a long fixed turn. The car sends one short correction command, polls the sensors again, and immediately adjusts based on the latest sensor state.
+
+## Finish Detection
+
+The finish mark is detected as a black-white-black pattern.
+
+Logic:
+
+```text
+1. Detect first horizontal black line: both sensors read 1,1
+2. Move forward slowly
+3. Once the sensors leave the first black line, start checking for the second black line
+4. If another 1,1 is detected within the short finish window, treat it as the finish
+5. Stop the car and flash all lights
+```
+
+Important parameters:
+
+```c
+#define FINISH_DETECT_SPEED 80
+#define FINISH_FIRST_RELEASE_TIMEOUT_MS 350
+#define FINISH_WHITE_GAP_MAX_MS 350
+#define FINISH_SECOND_CONFIRM_MS 10
+```
+
+The previous `FINISH_WHITE_GAP_MIN_MS` check was removed because setting it to `0` caused a compiler warning:
+
+```text
+comparison of unsigned expression >= 0 is always true
+```
+
+Since warnings are treated as errors in the Hi3861 build, this stopped compilation.
+
+## Junction Handling
+
+During testing, normal branch intersections were often read as `1,1`, the same as a horizontal marker.
+
+The strategy was changed:
+
+```text
+First, check whether 1,1 is the finish black-white-black pattern.
+If not finish, treat it as a junction.
+```
+
+Junction decision rule:
+
+```text
+1st junction marker: bias left
+2nd junction marker: bias right
+Further junction markers: alternate by odd/even count
+```
+
+Junction parameters:
+
+```c
+#define JUNCTION_LEFT_FAST_SPEED 145
+#define JUNCTION_LEFT_SLOW_SPEED 55
+#define JUNCTION_RIGHT_FAST_SPEED 145
+#define JUNCTION_RIGHT_SLOW_SPEED 55
+#define JUNCTION_BIAS_MS 260
+#define JUNCTION_RELEASE_TIMEOUT_MS 700
+```
+
+The previous dead-end backtracking logic was removed from the active version because the real track behavior showed that branch intersections were being detected as double-black junction events.
+
+## STM32 Side
+
+The STM32 project is:
+
+```text
+C:\Users\18500\Desktop\summer\test\test6-way\TIMER\USER\TIMER.uvprojx
+```
+
+STM32 keeps only the required modules:
+
+```text
+USART1 receiver
+TIM4 PWM motor control
+WS2812 car light control
+```
+
+STM32 receives motor frames from Hi3861 and drives the motors.
+
+STM32 also supports the finish command:
+
+```text
+E\n
+```
+
+When STM32 receives `E\n`, it stops the motors and flashes all WS2812 lights.
+
+## Current Status
+
+Completed:
+
+```text
+Created test6-way from test5-blacktape
+Removed unrelated modules
+Implemented high-frequency IR polling
+Implemented slow line following
+Implemented stronger short correction
+Implemented black-white-black finish detection
+Implemented junction count logic
+Implemented finish light flashing command
+Fixed Hi3861 build warning caused by unsigned comparison
+Updated STM32 UART command handling
+```
+
+Current behavior:
+
+```text
+The car follows the line slowly.
+When both sensors read black, it first checks for the finish pattern.
+If not finish, it treats the event as a junction.
+The first junction biases left.
+The second junction biases right.
+At the finish black-white-black marker, the car stops and flashes all lights.
+```
+
+## Tuning Notes
+
+If line following is unstable:
+
+```c
+CRUISE_SPEED
+CORRECT_FAST_SPEED
+CORRECT_SLOW_SPEED
+SAMPLE_PERIOD_MS
+```
+
+If the car misses the finish mark:
+
+```c
+FINISH_DETECT_SPEED
+FINISH_WHITE_GAP_MAX_MS
+FINISH_SECOND_CONFIRM_MS
+```
+
+If the car turns too much or too little at junctions:
+
+```c
+JUNCTION_BIAS_MS
+JUNCTION_LEFT_FAST_SPEED
+JUNCTION_LEFT_SLOW_SPEED
+JUNCTION_RIGHT_FAST_SPEED
+JUNCTION_RIGHT_SLOW_SPEED
+```
+
+If the correction direction is reversed, swap the left and right motor speed values in the correction functions.
