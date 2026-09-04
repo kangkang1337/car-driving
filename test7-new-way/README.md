@@ -1,4 +1,4 @@
-# test6-way
+# test7-new-way
 
 巡线实验工程。黑线应位于左右两个红外传感器中间，地板返回 `0`，黑线返回 `1`。
 
@@ -9,7 +9,7 @@
 - 父级 `applications/sample/wifi-iot/app/BUILD.gn` 中启用：
 
 ```gn
-"test6-way:way",
+"test7-newway:way",
 ```
 
 已移除 WiFi、蓝牙、云端、OLED、SHT20、AP3216C、超声波和舵机依赖。
@@ -65,3 +65,7 @@ Keil 工程：`TIMER/USER/TIMER.uvprojx`
 - `FINISH_SECOND_CONFIRM_MS`
 
 如果左右修正方向和实车相反，交换 `CarCorrectLeft()` 和 `CarCorrectRight()` 中的左右速度即可。
+
+# 9.4
+进行了大量数据和程序的精校，如放弃原有岔路口判定并更改为按双黑的次数进行左转或右转的执行
+最终到达终点
