@@ -918,14 +918,14 @@ If the correction direction is reversed, swap the left and right motor speed val
 
 # 9.4
 
-## Project: test6-way Line Following Experiment
+## Project: test7-newway Line Following Experiment
 
-Today’s work continued on the `test6-way` line-following experiment for the QST smart car.
+Today’s work continued on the `test7-newway` line-following experiment for the QST smart car.
 
 Project path:
 
 ```text
-C:\Users\18500\Desktop\summer\test\test6-way
+C:\Users\18500\Desktop\summer\test\test7-newway
 ```
 
 ## Goal
