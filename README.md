@@ -914,3 +914,244 @@ JUNCTION_RIGHT_SLOW_SPEED
 ```
 
 If the correction direction is reversed, swap the left and right motor speed values in the correction functions.
+
+
+# 9.4
+
+## Project: test6-way Line Following Experiment
+
+Today’s work continued on the `test6-way` line-following experiment for the QST smart car.
+
+Project path:
+
+```text
+C:\Users\18500\Desktop\summer\test\test6-way
+```
+
+## Goal
+
+The car uses two infrared sensors to follow a black line. During normal driving, the black line should stay between the two sensors.
+
+Sensor values:
+
+```text
+Floor: 0
+Black line: 1
+```
+
+The track includes branch intersections and a finish marker.
+
+## Hardware Mapping
+
+Hi3861 side:
+
+```text
+Left IR sensor: GPIO13
+Right IR sensor: GPIO14
+UART2 TX to STM32: GPIO11
+UART2 RX: GPIO12
+Baud rate: 115200
+```
+
+STM32 side:
+
+```text
+USART1 receives motor and light commands from Hi3861
+TIM4 controls motor PWM
+WS2812 LEDs are used as car lights
+```
+
+## Line Following
+
+The main loop polls the IR sensors every `10 ms`.
+
+Basic sensor logic:
+
+```text
+0,0: line is between the two sensors, move forward
+1,0: left sensor detects black, correct left
+0,1: right sensor detects black, correct right
+1,1: marker or branch intersection detected
+```
+
+Current speed settings:
+
+```c
+#define CRUISE_SPEED 125
+#define CORRECT_FAST_SPEED 145
+#define CORRECT_SLOW_SPEED 55
+#define SAMPLE_PERIOD_MS 10
+```
+
+The correction logic sends short motor commands and immediately polls the sensors again. This keeps the car from making long blind turns and improves line-following stability at low speed.
+
+## Marker and Junction Handling
+
+During testing, branch intersections were often detected as `1,1`, the same as a horizontal marker.
+
+The strategy was adjusted so that `1,1` is handled as a marker event:
+
+```text
+First, check whether the marker is the finish pattern.
+If not finish, treat it as a branch intersection.
+```
+
+Branch behavior:
+
+```text
+1st non-finish marker: bias left
+2nd non-finish marker: bias right
+Later non-finish markers: alternate by odd/even count
+```
+
+The branch turn time was increased because the car was almost turning correctly but still slightly short at each branch.
+
+Current branch parameters:
+
+```c
+#define JUNCTION_LEFT_FAST_SPEED 145
+#define JUNCTION_LEFT_SLOW_SPEED 55
+#define JUNCTION_RIGHT_FAST_SPEED 145
+#define JUNCTION_RIGHT_SLOW_SPEED 55
+#define JUNCTION_BIAS_MS 380
+#define JUNCTION_RELEASE_TIMEOUT_MS 700
+```
+
+`JUNCTION_BIAS_MS` was increased from `260 ms` to `380 ms`.
+
+## Finish Detection
+
+The finish marker was restored to a black-white-black pattern.
+
+Physical finish marker:
+
+```text
+First black line width: about 1.9 cm
+White gap: about 1.5 cm
+Second black line width: about 1.9 cm
+```
+
+Finish detection flow:
+
+```text
+1. Detect first 1,1 marker
+2. Move forward slowly
+3. Wait until the sensors leave the first black line
+4. Look for a second 1,1 marker within a short time window
+5. If the second marker is found, stop the car and flash all lights
+6. If the second marker is not found, treat the event as a branch intersection
+```
+
+Current finish parameters:
+
+```c
+#define FINISH_DETECT_SPEED 80
+#define FINISH_FIRST_RELEASE_TIMEOUT_MS 350
+#define FINISH_WHITE_GAP_MAX_MS 350
+#define FINISH_SECOND_CONFIRM_MS 10
+```
+
+The earlier “third detected black line means finish” logic was removed. The finish is now determined only by the black-white-black structure.
+
+## Build Fix
+
+A previous build error was caused by this kind of comparison:
+
+```c
+whiteElapsed >= FINISH_WHITE_GAP_MIN_MS
+```
+
+When `FINISH_WHITE_GAP_MIN_MS` was `0`, the compiler reported:
+
+```text
+comparison of unsigned expression >= 0 is always true
+```
+
+Because the Hi3861 build treats warnings as errors, this stopped compilation.
+
+The unused minimum-gap macro and the always-true comparison were removed. The current code does not use:
+
+```c
+FINISH_WHITE_GAP_MIN_MS
+```
+
+## STM32 Behavior
+
+STM32 receives control commands from Hi3861.
+
+Motor frame format:
+
+```text
+0xFC left_dir left_speed right_dir right_speed 0xFD
+```
+
+Finish command:
+
+```text
+E\n
+```
+
+When STM32 receives `E\n`, it stops the motors and flashes all WS2812 car lights.
+
+## Current Status
+
+Completed today:
+
+```text
+Restored black-white-black finish detection
+Removed the third-marker finish rule
+Increased branch turning time
+Kept high-frequency 10 ms IR polling
+Kept short correction commands for stable line following
+Fixed the unsigned comparison build issue
+Updated README behavior notes
+```
+
+Current behavior:
+
+```text
+The car follows the line slowly.
+At a 1,1 marker, it first checks for the finish pattern.
+If the finish pattern is detected, the car stops and flashes all lights.
+If not finish, the car treats the marker as a branch intersection.
+The first branch biases left.
+The second branch biases right.
+The branch bias time is longer than before to help the car complete the turn.
+```
+
+## Tuning Notes
+
+If the car still does not turn enough at branches, increase:
+
+```c
+JUNCTION_BIAS_MS
+```
+
+Suggested next value:
+
+```c
+#define JUNCTION_BIAS_MS 450
+```
+
+If the car turns too much, reduce it back toward:
+
+```c
+#define JUNCTION_BIAS_MS 320
+```
+
+If the finish marker is missed, tune:
+
+```c
+FINISH_DETECT_SPEED
+FINISH_WHITE_GAP_MAX_MS
+FINISH_SECOND_CONFIRM_MS
+```
+
+If the car loses the main line, tune:
+
+```c
+CRUISE_SPEED
+CORRECT_FAST_SPEED
+CORRECT_SLOW_SPEED
+SAMPLE_PERIOD_MS
+```
